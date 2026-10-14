@@ -1,5 +1,5 @@
 {
-    "name": "appguard/laravel-guard",
+    "name": "explorin/laravel-guard",
     "description": "Application-level security guard: scoring-based detection of brute force, enumeration and probing before requests reach your controllers.",
     "type": "library",
     "license": "MIT",
