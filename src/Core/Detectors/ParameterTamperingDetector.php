@@ -38,8 +38,10 @@ final class ParameterTamperingDetector extends AbstractDetector
         $score = (int) ($this->config['score'] ?? 35);
         $signals = [];
 
+        $allKeys = $this->collectAllKeys($inputs);
+
         foreach ($forbiddenFields as $field) {
-            if (array_key_exists($field, $inputs)) {
+            if (in_array($field, $allKeys, true)) {
                 $signals[] = new Signal(
                     $this->name(),
                     $score,
@@ -50,5 +52,20 @@ final class ParameterTamperingDetector extends AbstractDetector
         }
 
         return $signals;
+    }
+
+    /**
+     * Mengumpulkan seluruh nama key input termasuk yang berada dalam struktur bersarang.
+     */
+    private function collectAllKeys(array $inputs): array
+    {
+        $keys = [];
+        foreach ($inputs as $key => $val) {
+            $keys[] = (string) $key;
+            if (is_array($val)) {
+                $keys = array_merge($keys, $this->collectAllKeys($val));
+            }
+        }
+        return array_unique($keys);
     }
 }

@@ -67,11 +67,21 @@ final class RequestContextFactory
      */
     public function resolveClientIp(Request $request): string
     {
-        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP'])) {
+        // 1. Jika Laravel sudah memiliki IP valid via TrustProxies, utamakan $request->ip()
+        $clientIp = $request->ip();
+        if ($clientIp && filter_var($clientIp, FILTER_VALIDATE_IP)) {
+            // Jika bukan loopback / private IP atau jika tidak ada header reverse proxy khusus, gunakan ini
+            if (!empty($_SERVER['HTTP_CF_CONNECTING_IP']) && filter_var($_SERVER['HTTP_CF_CONNECTING_IP'], FILTER_VALIDATE_IP)) {
+                return $_SERVER['HTTP_CF_CONNECTING_IP'];
+            }
+            return (string) $clientIp;
+        }
+
+        if (!empty($_SERVER['HTTP_CF_CONNECTING_IP']) && filter_var($_SERVER['HTTP_CF_CONNECTING_IP'], FILTER_VALIDATE_IP)) {
             return $_SERVER['HTTP_CF_CONNECTING_IP'];
         }
 
-        if (!empty($_SERVER['HTTP_X_REAL_IP'])) {
+        if (!empty($_SERVER['HTTP_X_REAL_IP']) && filter_var($_SERVER['HTTP_X_REAL_IP'], FILTER_VALIDATE_IP)) {
             return $_SERVER['HTTP_X_REAL_IP'];
         }
 
@@ -83,6 +93,6 @@ final class RequestContextFactory
             }
         }
 
-        return (string) $request->ip() ?: '127.0.0.1';
+        return (string) $clientIp ?: '127.0.0.1';
     }
 }

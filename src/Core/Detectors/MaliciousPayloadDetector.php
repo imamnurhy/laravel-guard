@@ -45,11 +45,9 @@ final class MaliciousPayloadDetector extends AbstractDetector
         $sqliScore = (int) ($this->config['sqli_score'] ?? 100);
         $xssScore = (int) ($this->config['xss_score'] ?? 50);
 
-        foreach ($inputs as $key => $val) {
-            if (in_array($key, $safeFields, true) || !is_string($val) || $val === '') {
-                continue;
-            }
+        $flattened = $this->flattenInputs($inputs, $safeFields);
 
+        foreach ($flattened as $key => $val) {
             // 1. Cek SQL Injection
             foreach ($this->sqliPatterns as $pattern) {
                 if (preg_match($pattern, $val)) {
@@ -68,5 +66,29 @@ final class MaliciousPayloadDetector extends AbstractDetector
         }
 
         return [];
+    }
+
+    /**
+     * Mengurai input bersarang (nested array) menjadi pasangan key-value string.
+     */
+    private function flattenInputs(array $inputs, array $safeFields, string $prefix = ''): array
+    {
+        $result = [];
+
+        foreach ($inputs as $key => $val) {
+            $fullKey = $prefix === '' ? (string)$key : "{$prefix}.{$key}";
+
+            if (in_array($key, $safeFields, true) || in_array($fullKey, $safeFields, true)) {
+                continue;
+            }
+
+            if (is_array($val)) {
+                $result = array_merge($result, $this->flattenInputs($val, $safeFields, $fullKey));
+            } elseif (is_string($val) && $val !== '') {
+                $result[$fullKey] = $val;
+            }
+        }
+
+        return $result;
     }
 }

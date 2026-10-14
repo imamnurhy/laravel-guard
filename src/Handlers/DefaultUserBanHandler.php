@@ -56,6 +56,9 @@ class DefaultUserBanHandler
             'ip' => $ip,
         ], now()->addDays(7));
 
+        // Sinkronisasi dengan key block:user: yang dibaca Guard::inspect
+        Cache::put("block:user:{$userId}", 1, now()->addDays(7));
+
         // 3. Trigger Laravel Event agar aplikasi induk bisa menjalankan custom hook (misal hapus ActiveUser)
         event(new UserBanned($user, $score, $reason, $context));
 
@@ -83,9 +86,18 @@ class DefaultUserBanHandler
      */
     public function forceLogout(Request $request, string $reason = 'Akun Anda dinonaktifkan oleh sistem keamanan.'): Response
     {
+        $user = $request->user();
+        if ($user && method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
+            try {
+                $user->currentAccessToken()->delete();
+            } catch (\Throwable) {}
+        }
+
         Auth::logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+        if ($request->hasSession()) {
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         $message = 'Akun Anda telah dinonaktifkan oleh sistem keamanan karena aktivitas yang tidak wajar. Silakan hubungi Administrator jika ini merupakan kekeliruan.';
 

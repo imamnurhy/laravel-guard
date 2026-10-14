@@ -32,13 +32,15 @@ final class AnomalyDetector extends AbstractDetector
         $safeFields = $this->config['safe_fields'] ?? [];
         $inputs = $ctx->attributes['inputs'] ?? [];
 
-        foreach ($inputs as $key => $val) {
-            if (in_array($key, $safeFields, true) || !is_string($val) || strlen($val) < $minLen) {
+        $flattened = $this->flattenInputs($inputs, $safeFields);
+
+        foreach ($flattened as $key => $val) {
+            if (strlen($val) < $minLen) {
                 continue;
             }
 
-            // Abaikan Data URI gambar
-            if (str_starts_with($val, 'data:image/')) {
+            // Abaikan Data URI file/gambar/dokumen umum
+            if (str_starts_with($val, 'data:')) {
                 continue;
             }
 
@@ -55,6 +57,30 @@ final class AnomalyDetector extends AbstractDetector
         }
 
         return $signals;
+    }
+
+    /**
+     * Mengurai input bersarang menjadi flat array string.
+     */
+    private function flattenInputs(array $inputs, array $safeFields, string $prefix = ''): array
+    {
+        $result = [];
+
+        foreach ($inputs as $key => $val) {
+            $fullKey = $prefix === '' ? (string)$key : "{$prefix}.{$key}";
+
+            if (in_array($key, $safeFields, true) || in_array($fullKey, $safeFields, true)) {
+                continue;
+            }
+
+            if (is_array($val)) {
+                $result = array_merge($result, $this->flattenInputs($val, $safeFields, $fullKey));
+            } elseif (is_string($val) && $val !== '') {
+                $result[$fullKey] = $val;
+            }
+        }
+
+        return $result;
     }
 
     public function observe(RequestContext $ctx, int $status): array

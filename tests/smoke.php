@@ -84,6 +84,10 @@ check('SQL injection detected', $guard->inspect($ctx('/search', '12.12.12.12', n
     'inputs' => ['q' => "' union select null, username, password from users--"]
 ]))->score >= 100);
 
+check('nested SQL injection detected', $guard->inspect($ctx('/filter', '12.12.12.13', null, null, 'POST', [
+    'inputs' => ['filter' => ['keyword' => "' union select null, username, password from users--"]]
+]))->score >= 100);
+
 check('XSS payload detected', $guard->inspect($ctx('/comment', '13.13.13.13', null, null, 'POST', [
     'inputs' => ['text' => "<script>alert('xss')</script>"]
 ]))->score >= 50);
@@ -91,6 +95,10 @@ check('XSS payload detected', $guard->inspect($ctx('/comment', '13.13.13.13', nu
 // 6. Parameter Tampering
 check('parameter tampering (is_admin injection) detected', $guard->inspect($ctx('/profile/update', '14.14.14.14', null, '101', 'POST', [
     'inputs' => ['is_admin' => 1, 'nama' => 'Hacker']
+]))->score >= 35);
+
+check('nested parameter tampering (user[is_admin]) detected', $guard->inspect($ctx('/profile/update', '14.14.14.15', null, '102', 'POST', [
+    'inputs' => ['user' => ['is_admin' => 1]]
 ]))->score >= 35);
 
 // 7. Manual recordViolation (mis. IDOR dari Controller) & Auto-Banned trigger
