@@ -1,4 +1,4 @@
-# AppGuard for Laravel & PHP (`appguard/laravel-guard`)
+# AppGuard for Laravel & PHP (`explorin/laravel-guard`)
 
 > **Application-Level Security Guard, Scoring-Based WAF, and Autonomous Anti-Banned with Vulnerability Dataset Capture.**
 
@@ -12,7 +12,7 @@ Dibangun dengan prinsip **Scoring-based Detection** (bukan if-else kaku), berjal
 
 ### 1. Instalasi
 ```bash
-composer require appguard/laravel-guard
+composer require explorin/laravel-guard
 php artisan vendor:publish --tag=guard-config
 ```
 
@@ -27,7 +27,7 @@ GUARD_TEBOT_ENABLED=true
 
 ### 3. Gunakan di Controller (Pencegahan IDOR)
 ```php
-use AppGuard\Laravel\Facades\SecurityGuard;
+use AppGuard\Facades\SecurityGuard;
 
 if ($permohonan->user_id !== auth()->id()) {
     SecurityGuard::recordViolation(auth()->user(), 'idor', 25, "Percobaan akses dokumen orang lain");

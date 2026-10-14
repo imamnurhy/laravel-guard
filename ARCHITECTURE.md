@@ -1,4 +1,4 @@
-# 🏛️ Arsitektur & Desain Teknis — AppGuard (`appguard/laravel-guard`)
+# 🏛️ Arsitektur & Desain Teknis — AppGuard (`explorin/laravel-guard`)
 
 Dokumen ini menjelaskan arsitektur internal, alur eksekusi request, modul-modul utama, serta integrasi komponen `app-guard`.
 
@@ -26,7 +26,7 @@ AppGuard dirancang dengan prinsip:
 [ TrustProxies / IP Normalizer ]
              │
              ▼
-[ AppGuard\Laravel\Http\GuardMiddleware ] ── (Fase PRE: handle)
+[ AppGuard\Http\GuardMiddleware ] ── (Fase PRE: handle)
              │
              ├── 1. Whitelist Check (IP / Safe Route) ──► [ Langsung Lolos ]
              ├── 2. IP Manual Blocklist Check ──────────► [ Tolak HTTP 403 ]
@@ -75,7 +75,7 @@ AppGuard dirancang dengan prinsip:
 - **`Contracts\Store`**: Antarmuka abstraksi cache untuk counter skor reputasi.
 - **`Contracts\VulnerabilityStore`**: Antarmuka perekaman celah keamanan.
 
-### B. Namespace `AppGuard\Laravel` (Adapter Framework Laravel)
+### B. Komponen Adapter Laravel (`src/`)
 - **`GuardServiceProvider`**: Registrasi singleton container, pembaca konfigurasi `config/guard.php`, auto-injection middleware kernel, dan event listener autentikasi.
 - **`Http\GuardMiddleware`**: Middleware global yang mengapit eksekusi aplikasi (handle & terminate).
 - **`Handlers\DefaultUserBanHandler`**: Pelaksana mutasi status database (`c_status = 1`), pembersihan session, dan redirection login.

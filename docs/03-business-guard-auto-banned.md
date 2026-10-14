@@ -11,7 +11,7 @@ Firewall jaringan biasa (WAF) tidak bisa mengetahui apakah Pemohon A berhak memb
 Ketika terjadi percobaan **IDOR (Insecure Direct Object Reference)** di mana pengguna mencoba mengakses ID permohonan atau dokumen milik orang lain, controller melaporkan pelanggaran ini ke AppGuard menggunakan Facade:
 
 ```php
-use AppGuard\Laravel\Facades\SecurityGuard;
+use AppGuard\Facades\SecurityGuard;
 ```
 
 ---
@@ -24,7 +24,7 @@ Berikut contoh pencegahan IDOR pada berkas dan data permohonan:
 namespace App\Http\Controllers;
 
 use App\Models\Permohonan;
-use AppGuard\Laravel\Facades\SecurityGuard;
+use AppGuard\Facades\SecurityGuard;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -93,7 +93,7 @@ Ketika akumulasi poin penalti seorang pengguna mencapai ambang batas (default **
 3. **Penyelamatan Bukti Celah (Dataset ML):**
    Rincian pelanggaran dicatat ke file dataset JSONL `vulnerabilities.jsonl`.
 4. **Trigger Laravel Event:**
-   Event `AppGuard\Laravel\Events\UserBanned` ditembakkan sehingga aplikasi induk bisa menjalankan pembersihan tambahan (misalnya menghapus sesi tabel `ActiveUser`).
+   Event `AppGuard\Events\UserBanned` ditembakkan sehingga aplikasi induk bisa menjalankan pembersihan tambahan (misalnya menghapus sesi tabel `ActiveUser`).
 5. **Notifikasi Darurat Telegram (Tebot):**
    Alert dikirim seketika ke grup Telegram pengawas DPMPTSP/Keamanan.
 6. **Force Logout & Response 403:**

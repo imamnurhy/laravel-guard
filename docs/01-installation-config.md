@@ -9,7 +9,7 @@ Panduan lengkap instalasi, opsi environment `.env`, dan konfigurasi `config/guar
 Jalankan perintah Composer pada proyek Laravel:
 
 ```bash
-composer require appguard/laravel-guard
+composer require explorin/laravel-guard
 ```
 
 Publish file konfigurasi `guard.php` ke direktori `config/`:

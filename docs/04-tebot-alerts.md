@@ -11,7 +11,7 @@ AppGuard terintegrasi dengan **Tebot** untuk mengirim pesan peringatan instan ke
 - **Serangan Kritis** (misal percobaan SQL Injection eksplisit).
 
 ### Prinsip *Graceful Failsafe*:
-Package `appguard/laravel-guard` **tidak mewajibkan** `explorin/tebot` sebagai ketergantungan keras (*hard dependency*). 
+Package `explorin/laravel-guard` **tidak mewajibkan** `explorin/tebot` sebagai ketergantungan keras (*hard dependency*). 
 - Jika proyek Anda telah menginstal `explorin/tebot` dan mengonfigurasi API Key bot Telegram, notifikasi Telegram otomatis terkirim.
 - Jika proyek Anda tidak menggunakan Tebot, AppGuard secara otomatis beralih ke standard Laravel Logger (`Log::warning(...)`) tanpa memunculkan exception atau error runtime.
 
@@ -58,10 +58,10 @@ Pesan diformat menggunakan HTML cantik dengan detail lengkap insiden:
 
 ## 4. Customizing Notifier
 
-Jika Anda ingin mengganti Tebot dengan bot Telegram kustom Anda sendiri, Slack Webhook, atau Discord Webhook, Anda cukup me-listen event `AppGuard\Laravel\Events\UserBanned` di `EventServiceProvider` aplikasi Anda:
+Jika Anda ingin mengganti Tebot dengan bot Telegram kustom Anda sendiri, Slack Webhook, atau Discord Webhook, Anda cukup me-listen event `AppGuard\Events\UserBanned` di `EventServiceProvider` aplikasi Anda:
 
 ```php
-use AppGuard\Laravel\Events\UserBanned;
+use AppGuard\Events\UserBanned;
 
 Event::listen(UserBanned::class, function (UserBanned $event) {
     // Kirim notifikasi kustom ke Slack / Discord / WhatsApp / Email
