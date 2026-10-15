@@ -191,6 +191,11 @@ class GuardServiceProvider extends ServiceProvider
             // Route Receiver Webhook Instan (Tanpa CSRF)
             $this->app['router']->post('/guard/webhook', [\AppGuard\Http\WebhookController::class, 'handle'])
                 ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+
+            // Route Internal Proxy untuk Sensor Script & Beacon (Menyembunyikan Private IP Control Plane)
+            $this->app['router']->get('/guard/sensor.js', [\AppGuard\Http\SensorProxyController::class, 'script']);
+            $this->app['router']->post('/guard/beacon', [\AppGuard\Http\SensorProxyController::class, 'beacon'])
+                ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
         }
 
         if ($this->app->runningInConsole()) {
