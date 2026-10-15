@@ -13,9 +13,13 @@ use AppGuard\Core\Detectors\ParameterTamperingDetector;
 use AppGuard\Core\Detectors\PathTraversalDetector;
 use AppGuard\Core\Guard;
 use AppGuard\Console\BlockCommand;
+use AppGuard\Console\HeartbeatCommand;
 use AppGuard\Console\InstallCommand;
+use AppGuard\Console\ShipTelemetryCommand;
 use AppGuard\Console\StatusCommand;
+use AppGuard\Console\SyncCommand;
 use AppGuard\Console\UnblockCommand;
+use AppGuard\Core\ControlPlaneClient;
 use AppGuard\Handlers\DefaultUserBanHandler;
 use AppGuard\Http\GuardMiddleware;
 use AppGuard\Listeners\AuthEventListener;
@@ -56,6 +60,8 @@ class GuardServiceProvider extends ServiceProvider
             $app['cache']->store($app['config']->get('guard.store')),
             $app['config']->get('guard.control_plane.app_key')
         ));
+
+        $this->app->singleton(ControlPlaneClient::class, fn ($app) => new ControlPlaneClient());
 
         $this->app->singleton(Guard::class, function ($app) {
             $cfg = $app['config']->get('guard');
@@ -204,6 +210,9 @@ class GuardServiceProvider extends ServiceProvider
                 BlockCommand::class,
                 UnblockCommand::class,
                 StatusCommand::class,
+                SyncCommand::class,
+                ShipTelemetryCommand::class,
+                HeartbeatCommand::class,
             ]);
         }
     }

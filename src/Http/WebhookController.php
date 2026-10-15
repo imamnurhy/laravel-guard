@@ -21,8 +21,9 @@ class WebhookController
             return response()->json(['error' => 'Header verifikasi tidak lengkap.'], 400);
         }
 
-        // 2. Anti-Replay Attack (Window waktu 5 menit)
-        if (abs(time() - $timestamp) > 300) {
+        // 2. Anti-Replay Attack (Window waktu 5 menit dengan kompensasi clock skew jika ada)
+        $offset = (int) Cache::get('guard:server_time_offset', 0);
+        if (abs((time() + $offset) - $timestamp) > 300 && abs(time() - $timestamp) > 300) {
             return response()->json(['error' => 'Timestamp kedaluwarsa atau tidak valid.'], 401);
         }
 
@@ -32,12 +33,14 @@ class WebhookController
         }
         Cache::put($nonceKey, 1, 600);
 
-        // 3. Verifikasi Signature HMAC
-        $secret = config('guard.control_plane.app_secret', '');
-        $jsonPayload = $request->getContent();
-        $expectedSignature = hash_hmac('sha256', "{$timestamp}\n{$nonce}\n{$jsonPayload}", $secret);
+        // 3. Verifikasi Signature HMAC (Mendukung baik raw secret maupun sha256-hashed secret)
+        $secret = (string) config('guard.control_plane.app_secret', '');
+        $jsonPayload = (string) $request->getContent();
+        $message = "{$timestamp}\n{$nonce}\n{$jsonPayload}";
+        $expectedRaw = hash_hmac('sha256', $message, $secret);
+        $expectedHashed = hash_hmac('sha256', $message, hash('sha256', $secret));
 
-        if (! hash_equals($expectedSignature, $signature)) {
+        if (! hash_equals($expectedRaw, $signature) && ! hash_equals($expectedHashed, $signature)) {
             return response()->json(['error' => 'Signature webhook tidak valid.'], 403);
         }
 

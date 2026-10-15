@@ -76,7 +76,7 @@ return [
     | serta memutuskan sesi secara paksa (Force Logout).
     */
     'user_ban' => [
-        'enabled' => env('GUARD_BAN_ENABLED', true),
+        'enabled' => env('GUARD_BAN_ENABLED', false),
         'threshold' => (int) env('GUARD_BAN_THRESHOLD', 100),
         'duration' => 604800, // Durasi banned di cache (7 hari)
 
