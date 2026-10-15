@@ -15,7 +15,8 @@ final class PathMatcher
         $path = self::normalize($path);
 
         foreach ($patterns as $pattern) {
-            if (fnmatch(self::normalize($pattern), $path)) {
+            $norm = self::normalize($pattern);
+            if (fnmatch($norm, $path) || fnmatch("*/{$norm}", $path) || str_ends_with($path, '/' . ltrim($norm, '*'))) {
                 return $pattern;
             }
         }

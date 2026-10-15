@@ -299,6 +299,23 @@ final class Guard
             if ($ctx->userId !== null) {
                 $this->store->hit("score:user:{$ctx->userId}", $ttl, $signal->score);
             }
+
+            // Catat ke Vulnerability Store sebagai insiden terdeteksi jika memiliki skor ancaman tinggi
+            if ($this->vulnerabilityStore !== null && $signal->score >= 35) {
+                $this->recordVulnerability([
+                    'type' => $signal->detector,
+                    'severity' => $signal->score >= 100 ? 'critical' : ($signal->score >= 50 ? 'high' : 'warning'),
+                    'score' => $signal->score,
+                    'ip' => $ctx->ip,
+                    'user_id' => $ctx->userId,
+                    'method' => $ctx->method,
+                    'path' => $ctx->path,
+                    'payload' => $ctx->attributes['inputs'] ?? [],
+                    'reasons' => [$signal->reason],
+                    'user_agent' => $ctx->attributes['headers']['user-agent'][0] ?? null,
+                    'timestamp' => date('Y-m-d H:i:s'),
+                ]);
+            }
         }
     }
 

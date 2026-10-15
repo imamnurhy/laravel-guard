@@ -12,7 +12,7 @@ return [
     'mode' => env('GUARD_MODE', 'monitor'),
 
     /* Jika guard error (mis. Redis mati): true = loloskan request, false = tolak 503 */
-    'fail_open' => true,
+    'fail_open' => env('GUARD_FAIL_OPEN', true),
 
     /* Cache store untuk counter. null = default store. Disarankan redis. */
     'store' => env('GUARD_CACHE_STORE'),
@@ -28,11 +28,11 @@ return [
     | Menggunakan variabel standar ringkas: GUARD_URL, GUARD_KEY, GUARD_SECRET, GUARD_PUBKEY.
     */
     'control_plane' => [
-        'url' => env('GUARD_URL'),
-        'app_key' => env('GUARD_KEY'),
+        'url'        => env('GUARD_URL'),
+        'app_key'    => env('GUARD_KEY'),
         'app_secret' => env('GUARD_SECRET'),
         'public_key' => env('GUARD_PUBKEY'),
-        'timeout' => (int) env('GUARD_TIMEOUT', 3),
+        'timeout'    => (int) env('GUARD_TIMEOUT', 3),
     ],
 
 
@@ -50,15 +50,15 @@ return [
     /* Skor >= throttle -> dibatasi lajunya, skor >= block -> ditolak. */
     'thresholds' => [
         'throttle' => (int) env('GUARD_THROTTLE', 50),
-        'block' => (int) env('GUARD_BLOCK', 100),
+        'block'    => (int) env('GUARD_BLOCK', 100),
     ],
 
     /* Ambang berbeda per kelompok path (wildcard fnmatch). Yang cocok pertama dipakai. */
     'profiles' => [
         'strict' => [
             'throttle' => 30,
-            'block' => 70,
-            'paths' => ['login', 'register', 'password/*', 'api/login', 'api/auth/*'],
+            'block'    => 70,
+            'paths'    => ['login', 'register', 'password/*', 'api/login', 'api/auth/*'],
         ],
     ],
 
@@ -76,9 +76,9 @@ return [
     | serta memutuskan sesi secara paksa (Force Logout).
     */
     'user_ban' => [
-        'enabled' => env('GUARD_BAN_ENABLED', false),
+        'enabled'   => env('GUARD_BAN_ENABLED', false),
         'threshold' => (int) env('GUARD_BAN_THRESHOLD', 100),
-        'duration' => 604800, // Durasi banned di cache (7 hari)
+        'duration'  => 604800,                                  // Durasi banned di cache (7 hari)
 
         // Konfigurasi Model Eloquent aplikasi pengguna (ubah langsung di sini jika memakai custom model)
         'model' => App\Models\User::class,
@@ -113,39 +113,39 @@ return [
     */
     'rules' => [
         'idor' => [
-            'points' => 25,
+            'points'      => 25,
             'description' => 'Percobaan akses tidak sah pada data/berkas milik akun lain (IDOR)',
         ],
         'path_traversal' => [
-            'points' => 50,
+            'points'      => 50,
             'description' => 'Percobaan Directory/Path Traversal pada penanganan berkas',
         ],
         'malicious_upload' => [
-            'points' => 50,
+            'points'      => 50,
             'description' => 'Percobaan unggah berkas mencurigakan atau berbahaya',
         ],
         'sqli' => [
-            'points' => 100, // Langsung auto-banned
+            'points'      => 100,                                                // Langsung auto-banned
             'description' => 'Percobaan eksploitasi SQL Injection terdeteksi',
         ],
         'xss' => [
-            'points' => 50,
+            'points'      => 50,
             'description' => 'Percobaan injeksi skrip berbahaya (XSS)',
         ],
         'parameter_tampering' => [
-            'points' => 35,
+            'points'      => 35,
             'description' => 'Manipulasi parameter atau injeksi field sensitif (Parameter Tampering)',
         ],
         'captcha_abuse' => [
-            'points' => 35,
+            'points'      => 35,
             'description' => 'Percobaan manipulasi atau replay token CAPTCHA secara tidak sah',
         ],
         'scanner_fuzzing' => [
-            'points' => 50,
+            'points'      => 50,
             'description' => 'Aktivitas pemindaian celah / automated scanner fuzzing terdeteksi',
         ],
         'high_entropy' => [
-            'points' => 35,
+            'points'      => 35,
             'description' => 'Payload anomali dengan pola keacakan berlebih / obfuscation (Shannon Entropy)',
         ],
     ],
@@ -159,10 +159,10 @@ return [
 
         'honeypot' => [
             'enabled' => true,
-            'score' => 100,
-            'paths' => [
+            'score'   => 100,
+            'paths'   => [
                 '.env*',
-                '.git/*',
+                '.git*',
                 'wp-admin*',
                 'wp-login.php',
                 'xmlrpc.php',
@@ -176,35 +176,35 @@ return [
         ],
 
         'brute_force' => [
-            'enabled' => true,
-            'paths' => ['login', 'api/login', 'api/auth/*', 'password/email'],
-            'window' => 900,
-            'max_per_ip' => 20,
+            'enabled'            => true,
+            'paths'              => ['login', 'api/login', 'api/auth/*', 'password/email'],
+            'window'             => 900,
+            'max_per_ip'         => 20,
             'max_per_identifier' => 8,
-            'max_per_pair' => 5,
-            'score_ip' => 100,
-            'score_identifier' => 60,
-            'score_pair' => 100,
+            'max_per_pair'       => 5,
+            'score_ip'           => 100,
+            'score_identifier'   => 60,
+            'score_pair'         => 100,
         ],
 
         'denied_access' => [
-            'enabled' => true,
-            'statuses' => [403, 404],
-            'window' => 60,
-            'threshold' => 15,
-            'score' => 40,
+            'enabled'      => true,
+            'statuses'     => [403, 404],
+            'window'       => 60,
+            'threshold'    => 15,
+            'score'        => 40,
             'ignore_paths' => ['favicon.ico', 'robots.txt', '*.map', 'apple-touch-icon*'],
         ],
 
         'path_traversal' => [
             'enabled' => true,
-            'score' => 50,
+            'score'   => 50,
         ],
 
         'malicious_payload' => [
-            'enabled' => true,
+            'enabled'    => true,
             'sqli_score' => 100,
-            'xss_score' => 50,
+            'xss_score'  => 50,
             /*
              | Kolom formulir (field inputs) yang dikecualikan dari scanning payload SQLi/XSS.
              | Kolom seperti editor WYSIWYG, textarea artikel, atau field alamat bebas dapat
@@ -217,8 +217,8 @@ return [
         ],
 
         'parameter_tampering' => [
-            'enabled' => true,
-            'score' => 35,
+            'enabled'          => true,
+            'score'            => 35,
             'forbidden_fields' => [
                 'is_admin',
                 'role',
@@ -229,13 +229,13 @@ return [
         ],
 
         'anomaly' => [
-            'enabled' => true,
-            'entropy_threshold' => 4.5,
+            'enabled'            => true,
+            'entropy_threshold'  => 4.5,
             'entropy_min_length' => 120,
-            'entropy_score' => 35,
-            'fuzzing_window' => 30,
-            'fuzzing_threshold' => 15,
-            'fuzzing_score' => 50,
+            'entropy_score'      => 35,
+            'fuzzing_window'     => 30,
+            'fuzzing_threshold'  => 15,
+            'fuzzing_score'      => 50,
             /*
              | Kolom formulir yang dikecualikan dari kalkulasi Shannon Entropy & scanner fuzzing.
              | Field teks panjang bebas (komentar, alasan, artikel) dapat didaftarkan di sini.
