@@ -96,21 +96,9 @@ return [
         'redirect_route' => 'login',
     ],
 
-
     /*
     |--------------------------------------------------------------------------
-    | Notifikasi Darurat (Tebot / Telegram)
-    |--------------------------------------------------------------------------
-    | Otomatis mengirim peringatan ke Telegram saat terjadi Auto-Banned / serangan kritis.
-    | Failsafe: Jika package explorin/tebot tidak ada, otomatis fallback ke Log file.
-    */
-    'tebot' => [
-        'enabled' => env('GUARD_TEBOT_ENABLED', true),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | Incident / Vulnerability Exposure Storage (Dataset Forensik)
+    | Incident / Vulnerability Exposure Storage (Dataset Forensik & Telemetri)
     |--------------------------------------------------------------------------
     | Menyimpan payload, path, respon, dan celah yang berhasil terekspose
     | ke format JSONL terstruktur sebagai bahan audit forensik dan analisis keamanan.
@@ -210,9 +198,14 @@ return [
             'enabled' => true,
             'sqli_score' => 100,
             'xss_score' => 50,
+            /*
+             | Kolom formulir (field inputs) yang dikecualikan dari scanning payload SQLi/XSS.
+             | Kolom seperti editor WYSIWYG, textarea artikel, atau field alamat bebas dapat
+             | didaftarkan di sini agar tidak memicu false positive.
+             | Contoh: ['content', 'deskripsi', 'alamat', 'body_html']
+             */
             'safe_fields' => [
-                'alamat', 'lokasi_izin_alamat', 'alasan', 'alasan_perbaikan',
-                'keterangan', 'catatan', 'nama', 'realname', 'n_perusahaan', 'alamat_perusahaan', 'judul',
+                // 'content', 'deskripsi',
             ],
         ],
 
@@ -232,13 +225,71 @@ return [
             'fuzzing_window' => 30,
             'fuzzing_threshold' => 15,
             'fuzzing_score' => 50,
+            /*
+             | Kolom formulir yang dikecualikan dari kalkulasi Shannon Entropy & scanner fuzzing.
+             | Field teks panjang bebas (komentar, alasan, artikel) dapat didaftarkan di sini.
+             | Contoh: ['catatan', 'keterangan', 'alasan']
+             */
             'safe_fields' => [
-                'alamat', 'lokasi_izin_alamat', 'alasan', 'alasan_perbaikan',
-                'keterangan', 'catatan', 'nama', 'realname', 'n_perusahaan', 'alamat_perusahaan', 'judul',
+                // 'catatan', 'keterangan',
             ],
         ],
     ],
 
-    /* Detector buatan sendiri: class yang implement AppGuard\Core\Contracts\Detector. */
-    'custom_detectors' => [],
+    /*
+    |--------------------------------------------------------------------------
+    | Detektor Kustom (Custom Detectors)
+    |--------------------------------------------------------------------------
+    | Daftarkan kelas detektor buatan sendiri yang mengimplementasikan interface:
+    | `AppGuard\Core\Contracts\Detector`
+    |
+    | Setiap detektor kustom memiliki 2 fase inspeksi:
+    | 1. `inspect(RequestContext $ctx): array` (Fase PRE - sebelum controller dieksekusi)
+    | 2. `observe(RequestContext $ctx, int $status): array` (Fase POST - setelah response dibuat)
+    |
+    | Contoh Implementasi Sederhana:
+    | -------------------------------------------------------------------------
+    | namespace App\Security\Detectors;
+    |
+    | use AppGuard\Core\Contracts\Detector;
+    | use AppGuard\Core\RequestContext;
+    | use AppGuard\Core\Signal;
+    |
+    | class BlockDisallowedUserAgentDetector implements Detector
+    | {
+    |     public function name(): string
+    |     {
+    |         return 'disallowed_user_agent';
+    |     }
+    |
+    |     public function inspect(RequestContext $ctx): array
+    |     {
+    |         $ua = strtolower($ctx->userAgent ?? '');
+    |         if (str_contains($ua, 'sqlmap') || str_contains($ua, 'nikto')) {
+    |             return [
+    |                 new Signal(
+    |                     detector: $this->name(),
+    |                     score: 100, // Langsung capai threshold blokir
+    |                     reason: 'Automated vulnerability scanner UA terdeteksi: ' . $ua,
+    |                     metadata: ['user_agent' => $ua]
+    |                 ),
+    |             ];
+    |         }
+    |         return [];
+    |     }
+    |
+    |     public function observe(RequestContext $ctx, int $status): array
+    |     {
+    |         return []; // Tidak melakukan inspeksi di fase post-response
+    |     }
+    | }
+    | -------------------------------------------------------------------------
+    | Daftarkan class di bawah:
+    | 'custom_detectors' => [
+    |     \App\Security\Detectors\BlockDisallowedUserAgentDetector::class,
+    | ],
+    */
+    'custom_detectors' => [
+        // \App\Security\Detectors\BlockDisallowedUserAgentDetector::class,
+    ],
 ];

@@ -2,9 +2,9 @@
 
 namespace AppGuard\Handlers;
 
+use AppGuard\Core\Contracts\VulnerabilityStore;
 use AppGuard\Core\RequestContext;
 use AppGuard\Events\UserBanned;
-use AppGuard\Notifications\TebotNotifier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -14,7 +14,7 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DefaultUserBanHandler
 {
-    public function __construct(private TebotNotifier $notifier)
+    public function __construct(private ?VulnerabilityStore $vulnerabilityStore = null)
     {
     }
 
@@ -59,26 +59,31 @@ class DefaultUserBanHandler
         // Sinkronisasi dengan key block:user: yang dibaca Guard::inspect
         Cache::put("block:user:{$userId}", 1, now()->addDays(7));
 
-        // 3. Trigger Laravel Event agar aplikasi induk bisa menjalankan custom hook (misal hapus ActiveUser)
+        // 3. Trigger Laravel Event agar aplikasi induk bisa menjalankan custom hook
         event(new UserBanned($user, $score, $reason, $context));
 
-        // 4. Kirim notifikasi darurat via Tebot Telegram
-        $actionDesc = !empty($attributes)
-            ? 'Status (' . http_build_query($attributes, '', ', ') . ') & Force Logout'
-            : 'Account Banned & Force Logout';
-
-        $this->notifier->sendAlert(
-            'AKUN USER AUTO-BANNED',
-            $reason,
-            $ip,
-            $url,
-            [
+        // 4. Catat ke Vulnerability Store / Buffer telemetri agar segera dikirim ke Control Plane
+        // Notifikasi darurat (Telegram/Tebot) sepenuhnya ditangani oleh Control Plane secara terpusat
+        if ($this->vulnerabilityStore !== null) {
+            $this->vulnerabilityStore->recordExposed([
+                'type' => 'user_banned',
+                'severity' => 'critical',
+                'rule_key' => 'user_ban',
+                'score' => $score,
+                'ip' => $ip,
                 'user_id' => $userId,
                 'username' => $username,
-                'score' => $score,
-                'action' => $actionDesc,
-            ]
-        );
+                'method' => $context?->method ?? request()->method(),
+                'path' => $context?->path ?? request()->path(),
+                'payload' => [
+                    'reason' => $reason,
+                    'url' => $url,
+                ],
+                'response_status' => 403,
+                'reasons' => [$reason],
+                'timestamp' => date('Y-m-d H:i:s'),
+            ]);
+        }
     }
 
     /**

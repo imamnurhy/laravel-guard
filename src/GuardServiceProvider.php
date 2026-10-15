@@ -19,7 +19,6 @@ use AppGuard\Console\UnblockCommand;
 use AppGuard\Handlers\DefaultUserBanHandler;
 use AppGuard\Http\GuardMiddleware;
 use AppGuard\Listeners\AuthEventListener;
-use AppGuard\Notifications\TebotNotifier;
 use AppGuard\Stores\CacheStore;
 use AppGuard\Stores\JsonFileVulnerabilityStore;
 use Illuminate\Auth\Events\Failed;
@@ -40,8 +39,9 @@ class GuardServiceProvider extends ServiceProvider
             $app['config']->get('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'))
         ));
 
-        $this->app->singleton(TebotNotifier::class);
-        $this->app->singleton(DefaultUserBanHandler::class);
+        $this->app->singleton(DefaultUserBanHandler::class, fn ($app) => new DefaultUserBanHandler(
+            $app->make(VulnerabilityStore::class)
+        ));
 
         $this->app->singleton(BruteForceDetector::class, fn ($app) => new BruteForceDetector(
             $app->make(Store::class),
