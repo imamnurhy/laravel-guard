@@ -20,6 +20,22 @@ return [
     /* Log channel. null = default channel. */
     'log_channel' => env('GUARD_LOG_CHANNEL'),
 
+    /*
+    |--------------------------------------------------------------------------
+    | Centralized WAF Control Plane Hub Integration
+    |--------------------------------------------------------------------------
+    | Konfigurasi ringkas koneksi tenant ke Centralized Control Plane.
+    | Mendukung nama variabel pendek (GUARD_URL, GUARD_KEY, GUARD_SECRET, GUARD_PUBKEY)
+    | serta nama legacy untuk backward-compatibility.
+    */
+    'control_plane' => [
+        'url' => env('GUARD_URL', env('GUARD_CONTROL_PLANE_URL')),
+        'app_key' => env('GUARD_KEY', env('GUARD_APP_KEY')),
+        'app_secret' => env('GUARD_SECRET', env('GUARD_APP_SECRET')),
+        'public_key' => env('GUARD_PUBKEY', env('GUARD_PUBLIC_KEY')),
+        'timeout' => (int) env('GUARD_TIMEOUT', env('GUARD_SYNC_TIMEOUT', 3)),
+    ],
+
 
     /*
     |--------------------------------------------------------------------------
@@ -34,8 +50,8 @@ return [
 
     /* Skor >= throttle -> dibatasi lajunya, skor >= block -> ditolak. */
     'thresholds' => [
-        'throttle' => (int) env('GUARD_THROTTLE_THRESHOLD', 50),
-        'block' => (int) env('GUARD_BLOCK_THRESHOLD', 100),
+        'throttle' => (int) env('GUARD_THROTTLE', env('GUARD_THROTTLE_THRESHOLD', 50)),
+        'block' => (int) env('GUARD_BLOCK', env('GUARD_BLOCK_THRESHOLD', 100)),
     ],
 
     /* Ambang berbeda per kelompok path (wildcard fnmatch). Yang cocok pertama dipakai. */
@@ -61,8 +77,8 @@ return [
     | serta memutuskan sesi secara paksa (Force Logout).
     */
     'user_ban' => [
-        'enabled' => env('GUARD_USER_BAN_ENABLED', true),
-        'threshold' => (int) env('GUARD_USER_BAN_THRESHOLD', 100),
+        'enabled' => env('GUARD_BAN_ENABLED', env('GUARD_USER_BAN_ENABLED', true)),
+        'threshold' => (int) env('GUARD_BAN_THRESHOLD', env('GUARD_USER_BAN_THRESHOLD', 100)),
         'duration' => 604800, // Durasi banned di cache (7 hari)
         
         // Konfigurasi Model Eloquent aplikasi

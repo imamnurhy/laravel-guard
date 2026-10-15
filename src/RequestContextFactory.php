@@ -34,6 +34,8 @@ final class RequestContextFactory
             $inputs = [];
         }
 
+        $sensorToken = $request->header('X-Guard-Sensor-Token') ?: $request->cookie('guard_sensor_token');
+
         return new RequestContext(
             ip: (string) $this->resolveClientIp($request),
             method: $request->method(),
@@ -46,6 +48,7 @@ final class RequestContextFactory
                 'honeypot_fields' => $trapFields,
                 'inputs' => $inputs,
                 'route_parameters' => $request->route()?->parameters() ?? [],
+                'sensor_token' => $sensorToken,
             ],
         );
     }

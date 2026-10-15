@@ -52,10 +52,48 @@ class GuardServiceProvider extends ServiceProvider
             $app['config']->get('guard'),
         ));
 
+        $this->app->singleton(\AppGuard\Core\Contracts\DynamicRuleStore::class, fn ($app) => new \AppGuard\Stores\CacheDynamicRuleStore(
+            $app['cache']->store($app['config']->get('guard.store')),
+            $app['config']->get('guard.control_plane.app_key')
+        ));
+
         $this->app->singleton(Guard::class, function ($app) {
             $cfg = $app['config']->get('guard');
             $store = $app->make(Store::class);
             $vulnStore = $app->make(VulnerabilityStore::class);
+            $ruleStore = $app->make(\AppGuard\Core\Contracts\DynamicRuleStore::class);
+
+            // Terapkan Kebijakan Keamanan (Remote Policy) jika ada
+            if ($policy = $ruleStore->getPolicy()) {
+                if (isset($policy['enabled'])) {
+                    $cfg['enabled'] = (bool) $policy['enabled'];
+                }
+                if (isset($policy['mode'])) {
+                    $cfg['mode'] = (string) $policy['mode'];
+                }
+                if (isset($policy['fail_open'])) {
+                    $cfg['fail_open'] = (bool) $policy['fail_open'];
+                }
+                if (isset($policy['throttle_threshold'])) {
+                    $cfg['thresholds']['throttle'] = (int) $policy['throttle_threshold'];
+                }
+                if (isset($policy['block_threshold'])) {
+                    $cfg['thresholds']['block'] = (int) $policy['block_threshold'];
+                }
+                if (isset($policy['user_ban']['enabled'])) {
+                    $cfg['user_ban']['enabled'] = (bool) $policy['user_ban']['enabled'];
+                }
+                if (isset($policy['user_ban']['threshold'])) {
+                    $cfg['user_ban']['threshold'] = (int) $policy['user_ban']['threshold'];
+                }
+            }
+
+            // Gabungkan Dynamic Honeypots dari Control Plane
+            if (! empty($dynHoneypots = $ruleStore->getDynamicHoneypots())) {
+                $staticPaths = $cfg['detectors']['honeypot']['paths'] ?? [];
+                $cfg['detectors']['honeypot']['paths'] = array_values(array_unique(array_merge($staticPaths, $dynHoneypots)));
+            }
+
             $detectors = [];
 
             // 1. Honeypot Detector
@@ -91,6 +129,14 @@ class GuardServiceProvider extends ServiceProvider
             // 7. Adaptive Anomaly & Fuzzing Detector
             if ($cfg['detectors']['anomaly']['enabled'] ?? false) {
                 $detectors[] = new AnomalyDetector($store, $cfg['detectors']['anomaly']);
+            }
+
+            // 8. Guard Sensor Token Integrity Detector (Client Security Verification)
+            if ($cfg['detectors']['sensor_token']['enabled'] ?? true) {
+                $detectors[] = new \AppGuard\Core\Detectors\SensorTokenDetector(array_merge(
+                    $cfg['detectors']['sensor_token'] ?? [],
+                    ['secret_hash' => $cfg['control_plane']['app_secret'] ?? '']
+                ));
             }
 
             // Custom user detectors
@@ -141,6 +187,10 @@ class GuardServiceProvider extends ServiceProvider
         // Daftarkan route middleware alias 'guard'
         if (isset($this->app['router'])) {
             $this->app['router']->aliasMiddleware('guard', GuardMiddleware::class);
+
+            // Route Receiver Webhook Instan (Tanpa CSRF)
+            $this->app['router']->post('/guard/webhook', [\AppGuard\Http\WebhookController::class, 'handle'])
+                ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
         }
 
         if ($this->app->runningInConsole()) {
