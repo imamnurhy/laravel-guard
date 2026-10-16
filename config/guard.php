@@ -2,58 +2,76 @@
 
 return [
 
-    /* Matikan total tanpa uninstall: GUARD_ENABLED=false */
+    /*
+    |--------------------------------------------------------------------------
+    | 1. Operasional & Mode Sistem (Core & Operational Mode)
+    |--------------------------------------------------------------------------
+    | Pengaturan aktivasi dan perilaku dasar keamanan sistem AppGuard.
+    */
+
+    // Status proteksi: false untuk mematikan seluruh filter Guard tanpa uninstall package
     'enabled' => env('GUARD_ENABLED', true),
 
-    /*
-     | monitor = hanya mencatat log apa yang AKAN diblokir (aman untuk rollout awal)
-     | enforce = benar-benar menolak request (403/429) dan auto-banned
-     */
+    // Mode kerja sistem:
+    // - 'monitor' : Hanya mencatat log anomali dan serangan (aman untuk masa pengenalan/testing)
+    // - 'enforce' : Bertindak tegas memblokir (403/429), force logout, dan auto-ban user
     'mode' => env('GUARD_MODE', 'monitor'),
 
-    /* Jika guard error (mis. Redis mati): true = loloskan request, false = tolak 503 */
+    // Perilaku saat terjadi kegagalan sistem internal (misal: koneksi Redis/Cache down):
+    // - true  : (Fail-Open) Izinkan request lolos demi menjaga ketersediaan layanan publik
+    // - false : (Fail-Closed) Tolak request dengan HTTP 503 Service Unavailable demi keamanan
     'fail_open' => env('GUARD_FAIL_OPEN', true),
 
-    /* Cache store untuk counter. null = default store. Disarankan redis. */
+    // Driver cache untuk penyimpanan skor reputasi (null = mengikuti cache default Laravel, disarankan 'redis')
     'store' => env('GUARD_CACHE_STORE'),
 
-    /* Log channel. null = default channel. */
+    // Channel log Laravel untuk pencatatan event keamanan (null = default logging channel)
     'log_channel' => env('GUARD_LOG_CHANNEL'),
+
 
     /*
     |--------------------------------------------------------------------------
-    | Centralized WAF Control Plane Hub Integration
+    | 2. Integrasi Control Plane (WAF Centralized Hub)
     |--------------------------------------------------------------------------
-    | Konfigurasi ringkas koneksi tenant ke Centralized Control Plane.
-    | Menggunakan variabel standar ringkas: GUARD_URL, GUARD_KEY, GUARD_SECRET, GUARD_PUBKEY.
+    | Koneksi aplikasi (tenant) ke server pusat kendali AppGuard Control Plane.
+    | Digunakan untuk sinkronisasi kebijakan jarak jauh, heartbeat, dan telemetri.
     */
     'control_plane' => [
         'url'        => env('GUARD_URL'),
         'app_key'    => env('GUARD_KEY'),
         'app_secret' => env('GUARD_SECRET'),
         'public_key' => env('GUARD_PUBKEY'),
-        'timeout'    => (int) env('GUARD_TIMEOUT', 3),
+        'timeout'    => (int) env('GUARD_TIMEOUT', 3), // Batas waktu request ke Control Plane (detik)
     ],
 
 
     /*
     |--------------------------------------------------------------------------
-    | Allowlist Pengecualian IP (Bypass Guard)
+    | 3. Pengecualian Jaringan (IP Allowlist / Bypass)
     |--------------------------------------------------------------------------
-    | IP address atau CIDR subnet yang tidak pernah diperiksa (bypass total WAF & scoring).
+    | Daftar alamat IP tunggal atau subnet CIDR yang sepenuhnya dibebaskan dari
+    | seluruh inspeksi detektor WAF dan kalkulasi skor reputasi.
     | Contoh: ['127.0.0.1', '192.168.1.0/24', '10.0.0.0/8']
     */
     'allowlist' => [
         // '127.0.0.1',
     ],
 
-    /* Skor >= throttle -> dibatasi lajunya, skor >= block -> ditolak. */
+
+    /*
+    |--------------------------------------------------------------------------
+    | 4. Ambang Batas Skor & Profil Penalti (Thresholds & Profiles)
+    |--------------------------------------------------------------------------
+    | Sistem penilaian berbasis reputasi (0 - 100+):
+    | - Skor akumulasi >= throttle : Laju request mulai dibatasi (HTTP 429)
+    | - Skor akumulasi >= block    : Akses ditolak langsung (HTTP 403)
+    */
     'thresholds' => [
         'throttle' => (int) env('GUARD_THROTTLE', 50),
         'block'    => (int) env('GUARD_BLOCK', 100),
     ],
 
-    /* Ambang berbeda per kelompok path (wildcard fnmatch). Yang cocok pertama dipakai. */
+    // Ambang batas khusus untuk endpoint sensitif (pencocokan path menggunakan wildcard fnmatch)
     'profiles' => [
         'strict' => [
             'throttle' => 30,
@@ -62,41 +80,48 @@ return [
         ],
     ],
 
-    'reputation_ttl' => (int) env('GUARD_REPUTATION_TTL', 1800), // detik: berapa lama skor pelanggaran diingat
-    'throttle_per_minute' => 10,  // laju yang masih diizinkan saat status throttle
+    // Masa retensi skor reputasi IP / identitas dalam cache (dalam detik, misal 1800 = 30 menit)
+    'reputation_ttl' => (int) env('GUARD_REPUTATION_TTL', 1800),
 
-    /* Nama input yang dianggap identitas login (untuk brute force per akun). */
+    // Maksimal request per menit yang diizinkan ketika klien berstatus 'throttle'
+    'throttle_per_minute' => 10,
+
+    // Nama input formulir yang dikenali sebagai identitas akun (digunakan oleh brute force detector)
     'identifier_keys' => ['email', 'username', 'login'],
+
 
     /*
     |--------------------------------------------------------------------------
-    | Auto-Banned Akun Pengguna (Database & Session Level)
+    | 5. Proteksi Akun Pengguna (Auto-Banned & Force Logout)
     |--------------------------------------------------------------------------
-    | Mengubah status akun di database ketika mencapai ambang batas pelanggaran,
-    | serta memutuskan sesi secara paksa (Force Logout).
+    | Mengambil tindakan tegas terhadap pengguna terautentikasi yang melanggar aturan.
+    | Terbagi menjadi dua tingkatan (Tier):
+    | - Tier 1 (Soft Action) : Memutus sesi login secara paksa (Force Logout)
+    | - Tier 2 (Hard Action) : Memperbarui kolom status akun di database (Auto-Ban)
     */
     'user_ban' => [
-        'enabled'   => env('GUARD_BAN_ENABLED', true),
-        'threshold' => (int) env('GUARD_BAN_THRESHOLD', 100),
-        'duration'  => 604800,                                  // Durasi banned di cache (7 hari)
+        // Aktifkan mekanisme ban otomatis akun pengguna
+        'enabled' => env('GUARD_BAN_ENABLED', true),
 
-        /*
-         | Rule atau severity yang berhak memicu mutasi status database (Tier 2: Hard Ban).
-         | Di luar daftar ini, user hanya diputus sesinya (Tier 1: Force Logout).
-         */
+        // Ambang batas skor pelanggaran yang memicu tindakan ban akun
+        'threshold' => (int) env('GUARD_BAN_THRESHOLD', 100),
+
+        // Durasi penyimpanan status banned di layer cache (604800 detik = 7 hari)
+        'duration' => 604800,
+
+        // Rule yang BERHAK memicu Hard Ban (Tier 2). Pelanggaran di luar ini hanya memicu Force Logout (Tier 1)
         'critical_rules' => [
             'sqli',
             'malicious_upload',
             'path_traversal',
         ],
+
+        // Tingkat keparahan (severity) minimum yang berhak memicu Hard Ban
         'ban_severities' => [
             'critical',
         ],
 
-        /*
-         | Batas akumulasi skor per rule dalam satu jendela waktu reputasi.
-         | Mencegah satu anomali ringan/sedang terulang berkali-kali hingga memicu ban.
-         */
+        // Batas maksimal akumulasi poin per rule dalam 1 jendela reputasi
         'rule_score_caps' => [
             'high_entropy'        => 35,
             'parameter_tampering' => 70,
@@ -104,92 +129,97 @@ return [
             'captcha_abuse'       => 35,
         ],
 
-        // Konfigurasi Model Eloquent aplikasi pengguna (ubah langsung di sini jika memakai custom model)
+        // Model Eloquent pengguna yang digunakan aplikasi host
         'model' => App\Models\User::class,
 
-        /*
-         | Kolom database pengguna yang diubah saat akun di-banned.
-         | Format: ['nama_kolom' => nilai_banned, ...]
-         | Contoh: ['status' => 'banned'] atau ['is_active' => false] atau ['c_status' => 1]
-         */
+        // Kolom database yang dimutasi saat akun di-banned. Format: ['kolom' => nilai]
+        // Contoh: ['status' => 'banned'] atau ['c_status' => 1] atau ['is_active' => false]
         'attributes' => [
             // 'is_active' => false,
         ],
 
+        // Route pengalihan saat pengguna yang di-ban atau di-logout paksa mencoba mengakses aplikasi
         'redirect_route' => 'login',
     ],
 
+
     /*
     |--------------------------------------------------------------------------
-    | Incident / Vulnerability Exposure Storage (Dataset Forensik & Telemetri)
+    | 6. Penyimpanan Dataset Forensik (Vulnerability Telemetry)
     |--------------------------------------------------------------------------
-    | Menyimpan payload, path, respon, dan celah yang berhasil terekspose
-    | ke format JSONL terstruktur sebagai bahan audit forensik dan analisis keamanan.
+    | Menyimpan bukti percobaan serangan yang tervalidasi ke dalam berkas JSONL
+    | untuk kebutuhan audit keamanan internal dan pelatihan model Machine Learning.
     */
     'vulnerability' => [
         'dataset_path' => storage_path('app/guard/vulnerabilities.jsonl'),
     ],
 
+
     /*
     |--------------------------------------------------------------------------
-    | Bobot Skor Pelanggaran Khusus Aplikasi (Rules / Violations)
+    | 7. Bobot Skor Pelanggaran (Violation Rules Metadata)
     |--------------------------------------------------------------------------
+    | Menetapkan poin penalti (points) dan tingkat keparahan (severity) untuk setiap
+    | jenis insiden keamanan yang dilaporkan oleh detektor atau controller aplikasi.
     */
     'rules' => [
-        'idor' => [
-            'points'      => 25,
-            'severity'    => 'medium',
-            'description' => 'Percobaan akses tidak sah pada data/berkas milik akun lain (IDOR)',
-        ],
-        'path_traversal' => [
-            'points'      => 50,
+        'sqli' => [
+            'points'      => 100, // Langsung memicu blokir & auto-ban
             'severity'    => 'critical',
-            'description' => 'Percobaan Directory/Path Traversal pada penanganan berkas',
+            'description' => 'Percobaan eksploitasi SQL Injection terdeteksi',
         ],
         'malicious_upload' => [
             'points'      => 50,
             'severity'    => 'critical',
             'description' => 'Percobaan unggah berkas mencurigakan atau berbahaya',
         ],
-        'sqli' => [
-            'points'      => 100,                                                // Langsung auto-banned
+        'path_traversal' => [
+            'points'      => 50,
             'severity'    => 'critical',
-            'description' => 'Percobaan eksploitasi SQL Injection terdeteksi',
+            'description' => 'Percobaan Directory / Path Traversal pada penanganan berkas',
         ],
         'xss' => [
             'points'      => 50,
             'severity'    => 'high',
-            'description' => 'Percobaan injeksi skrip berbahaya (XSS)',
+            'description' => 'Percobaan injeksi skrip berbahaya (Cross-Site Scripting)',
+        ],
+        'idor' => [
+            'points'      => 25,
+            'severity'    => 'medium',
+            'description' => 'Percobaan akses tidak sah pada data/berkas milik akun lain (IDOR)',
         ],
         'parameter_tampering' => [
             'points'      => 35,
             'severity'    => 'medium',
-            'description' => 'Manipulasi parameter atau injeksi field sensitif (Parameter Tampering)',
+            'description' => 'Manipulasi parameter form atau field terlarang (Mass Assignment)',
+        ],
+        'scanner_fuzzing' => [
+            'points'      => 50,
+            'severity'    => 'medium',
+            'description' => 'Aktivitas automated vulnerability scanning / fuzzing URL terdeteksi',
         ],
         'captcha_abuse' => [
             'points'      => 35,
             'severity'    => 'medium',
             'description' => 'Percobaan manipulasi atau replay token CAPTCHA secara tidak sah',
         ],
-        'scanner_fuzzing' => [
-            'points'      => 50,
-            'severity'    => 'medium',
-            'description' => 'Aktivitas pemindaian celah / automated scanner fuzzing terdeteksi',
-        ],
         'high_entropy' => [
             'points'      => 35,
             'severity'    => 'low',
-            'description' => 'Payload anomali dengan pola keacakan berlebih / obfuscation (Shannon Entropy)',
+            'description' => 'Muatan teks anomali dengan tingkat keacakan berlebih (Shannon Entropy)',
         ],
     ],
 
+
     /*
     |--------------------------------------------------------------------------
-    | Detektor Bawaan (Built-in Detectors)
+    | 8. Detektor Bawaan (Built-in WAF Detectors)
     |--------------------------------------------------------------------------
+    | Konfigurasi parameter operasional masing-masing modul inspeksi bawaan.
     */
     'detectors' => [
 
+        // 1. Jebakan bot / scanner web otomatis (Honeypot paths)
         'honeypot' => [
             'enabled' => true,
             'score'   => 100,
@@ -208,47 +238,47 @@ return [
             'fields' => [],
         ],
 
+        // 2. Pencegahan percobaan login berulang (Brute Force)
         'brute_force' => [
             'enabled'            => true,
             'paths'              => ['login', 'api/login', 'api/auth/*', 'password/email'],
-            'window'             => 900,
-            'max_per_ip'         => 20,
-            'max_per_identifier' => 8,
-            'max_per_pair'       => 5,
+            'window'             => 900, // Jendela waktu monitoring (15 menit)
+            'max_per_ip'         => 20,  // Batas gagal per IP
+            'max_per_identifier' => 8,   // Batas gagal per username/email
+            'max_per_pair'       => 5,   // Batas gagal per pasangan (IP + username)
             'score_ip'           => 100,
             'score_identifier'   => 60,
             'score_pair'         => 100,
         ],
 
+        // 3. Deteksi pemindaian endpoint tak terdaftar secara masif (Enumerasi 403 / 404)
         'denied_access' => [
             'enabled'      => true,
             'statuses'     => [403, 404],
-            'window'       => 60,
-            'threshold'    => 15,
+            'window'       => 60, // 1 menit
+            'threshold'    => 15, // Maksimal respon error sebelum diberi penalti
             'score'        => 40,
             'ignore_paths' => ['favicon.ico', 'robots.txt', '*.map', 'apple-touch-icon*'],
         ],
 
+        // 4. Deteksi manipulasi path berkas (../, ..\, null-byte)
         'path_traversal' => [
             'enabled' => true,
             'score'   => 50,
         ],
 
+        // 5. Pemindaian pola injeksi payload SQLi & XSS pada query & request body
         'malicious_payload' => [
             'enabled'    => true,
             'sqli_score' => 100,
             'xss_score'  => 50,
-            /*
-             | Kolom formulir (field inputs) yang dikecualikan dari scanning payload SQLi/XSS.
-             | Kolom seperti editor WYSIWYG, textarea artikel, atau field alamat bebas dapat
-             | didaftarkan di sini agar tidak memicu false positive.
-             | Contoh: ['content', 'deskripsi', 'alamat', 'body_html']
-             */
+            // Field formulir yang dikecualikan dari scanning (misal: WYSIWYG editor artikel / HTML)
             'safe_fields' => [
-                // 'content', 'deskripsi',
+                // 'content', 'deskripsi', 'body_html',
             ],
         ],
 
+        // 6. Deteksi injeksi field parameter berbahaya (misal: is_admin, role, status)
         'parameter_tampering' => [
             'enabled'          => true,
             'score'            => 35,
@@ -261,6 +291,7 @@ return [
             ],
         ],
 
+        // 7. Deteksi anomali Shannon Entropy (payload ter-obfuskasi) dan scanner fuzzing
         'anomaly' => [
             'enabled'            => true,
             'entropy_threshold'  => 4.5,
@@ -269,71 +300,25 @@ return [
             'fuzzing_window'     => 30,
             'fuzzing_threshold'  => 15,
             'fuzzing_score'      => 50,
-            /*
-             | Kolom formulir yang dikecualikan dari kalkulasi Shannon Entropy & scanner fuzzing.
-             | Field teks panjang bebas (komentar, alasan, artikel) dapat didaftarkan di sini.
-             | Contoh: ['catatan', 'keterangan', 'alasan']
-             */
+            // Field teks panjang yang diizinkan memiliki variasi karakter bebas
             'safe_fields' => [
-                // 'catatan', 'keterangan',
+                // 'catatan', 'keterangan', 'alasan',
             ],
         ],
     ],
 
+
     /*
     |--------------------------------------------------------------------------
-    | Detektor Kustom (Custom Detectors)
+    | 9. Detektor Kustom (Custom Detectors)
     |--------------------------------------------------------------------------
-    | Daftarkan kelas detektor buatan sendiri yang mengimplementasikan interface:
-    | `AppGuard\Core\Contracts\Detector`
+    | Daftarkan kelas detektor tambahan buatan Anda yang mengimplementasikan:
+    | `AppGuard\Core\Contracts\Detector`.
     |
-    | Setiap detektor kustom memiliki 2 fase inspeksi:
-    | 1. `inspect(RequestContext $ctx): array` (Fase PRE - sebelum controller dieksekusi)
-    | 2. `observe(RequestContext $ctx, int $status): array` (Fase POST - setelah response dibuat)
-    |
-    | Contoh Implementasi Sederhana:
-    | -------------------------------------------------------------------------
-    | namespace App\Security\Detectors;
-    |
-    | use AppGuard\Core\Contracts\Detector;
-    | use AppGuard\Core\RequestContext;
-    | use AppGuard\Core\Signal;
-    |
-    | class BlockDisallowedUserAgentDetector implements Detector
-    | {
-    |     public function name(): string
-    |     {
-    |         return 'disallowed_user_agent';
-    |     }
-    |
-    |     public function inspect(RequestContext $ctx): array
-    |     {
-    |         $ua = strtolower($ctx->userAgent ?? '');
-    |         if (str_contains($ua, 'sqlmap') || str_contains($ua, 'nikto')) {
-    |             return [
-    |                 new Signal(
-    |                     detector: $this->name(),
-    |                     score: 100, // Langsung capai threshold blokir
-    |                     reason: 'Automated vulnerability scanner UA terdeteksi: ' . $ua,
-    |                     metadata: ['user_agent' => $ua]
-    |                 ),
-    |             ];
-    |         }
-    |         return [];
-    |     }
-    |
-    |     public function observe(RequestContext $ctx, int $status): array
-    |     {
-    |         return []; // Tidak melakukan inspeksi di fase post-response
-    |     }
-    | }
-    | -------------------------------------------------------------------------
-    | Daftarkan class di bawah:
-    | 'custom_detectors' => [
-    |     \App\Security\Detectors\BlockDisallowedUserAgentDetector::class,
-    | ],
+    | Panduan implementasi dapat dilihat pada dokumentasi package `docs/02-detectors-scoring.md`.
     */
     'custom_detectors' => [
-        // \App\Security\Detectors\BlockDisallowedUserAgentDetector::class,
+        // App\Security\Detectors\BlockDisallowedUserAgentDetector::class,
     ],
+
 ];
