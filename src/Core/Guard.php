@@ -20,6 +20,9 @@ final class Guard
     /** @var null|callable(mixed $user, int $score, string $reason, ?RequestContext $ctx): void */
     private $onUserBannedCallback = null;
 
+    /** @var null|callable(mixed $user, int $score, string $reason, ?RequestContext $ctx): void */
+    private $onUserForceLoggedOutCallback = null;
+
     /** @param Detector[] $detectors */
     public function __construct(
         private Store $store,
@@ -33,6 +36,12 @@ final class Guard
     public function setOnUserBanned(?callable $callback): self
     {
         $this->onUserBannedCallback = $callback;
+        return $this;
+    }
+
+    public function setOnUserForceLoggedOut(?callable $callback): self
+    {
+        $this->onUserForceLoggedOutCallback = $callback;
         return $this;
     }
 
@@ -88,6 +97,16 @@ final class Guard
             ));
         }
 
+        // Cek jika user ID sedang dalam status force logout (Tier 1 Soft Action)
+        if ($ctx->userId !== null && $this->store->has("force_logout:user:{$ctx->userId}")) {
+            $this->store->forget("force_logout:user:{$ctx->userId}");
+            return $this->log($ctx, new Decision(
+                Action::Block,
+                100,
+                [new Signal('user_force_logout', 100, 'User session was force logged out due to repeated anomalies')],
+            ));
+        }
+
         $signals = [];
         foreach ($this->detectors as $detector) {
             foreach ($detector->inspect($ctx) as $signal) {
@@ -118,9 +137,10 @@ final class Guard
             $action === Action::Throttle ? 60 : 0,
         );
 
-        // Jika score mencapai batas block dan ada user context, evaluasi auto-banned user
-        if ($score >= $blockAt && $ctx->userId !== null) {
-            $this->evaluateUserBan($ctx, $score, implode('; ', $decision->reasons()));
+        // Jika score mencapai batas penalti dan ada user context, evaluasi tindakan penalti (Tiered Defense)
+        $banThreshold = (int) ($this->config['user_ban']['threshold'] ?? 100);
+        if ($score >= $banThreshold && $ctx->userId !== null) {
+            $this->evaluateUserPenalty($ctx, $score, implode('; ', $decision->reasons()), signals: $signals);
         }
 
         return $this->log($ctx, $decision);
@@ -174,10 +194,30 @@ final class Guard
         $ttl = (int) ($this->config['reputation_ttl'] ?? 1800);
         $threshold = (int) ($this->config['user_ban']['threshold'] ?? 100);
 
-        // Tambah poin penalti ke IP dan User
-        $userScore = $this->store->hit("score:user:{$userId}", $ttl, $pts);
-        if ($ip !== '127.0.0.1') {
-            $this->store->hit("score:ip:{$ip}", $ttl, $pts);
+        // Periksa cap skor per rule (mencegah 1 anomali berulang menembus batas ban)
+        $ruleCaps = $this->config['user_ban']['rule_score_caps'] ?? [];
+        $ruleCap = (int) ($ruleCaps[$ruleKey] ?? 0);
+        $ptsToAdd = $pts;
+
+        if ($ruleCap > 0) {
+            $currentRuleScore = $this->store->count("score:user:{$userId}:rule:{$ruleKey}");
+            if ($currentRuleScore >= $ruleCap) {
+                $ptsToAdd = 0;
+            } else {
+                $ptsToAdd = min($pts, $ruleCap - $currentRuleScore);
+            }
+        }
+
+        if ($ptsToAdd > 0) {
+            if ($ruleCap > 0) {
+                $this->store->hit("score:user:{$userId}:rule:{$ruleKey}", $ttl, $ptsToAdd);
+            }
+            $userScore = $this->store->hit("score:user:{$userId}", $ttl, $ptsToAdd);
+            if ($ip !== '127.0.0.1') {
+                $this->store->hit("score:ip:{$ip}", $ttl, $ptsToAdd);
+            }
+        } else {
+            $userScore = $this->store->count("score:user:{$userId}");
         }
 
         // Catat ke Vulnerability Store sebagai celah/insiden yang terkonfirmasi
@@ -209,9 +249,17 @@ final class Guard
             ]);
         }
 
-        // Cek ambang batas pemblokiran user
+        // Cek ambang batas penalti user (Tiered Defense)
         if ($userScore >= $threshold) {
-            $this->evaluateUserBan($ctx ?? new RequestContext($ip, 'POST', '/', userId: (string)$userId), $userScore, $desc, $user);
+            $ruleSeverity = $rules[$ruleKey]['severity'] ?? null;
+            $this->evaluateUserPenalty(
+                $ctx ?? new RequestContext($ip, 'POST', '/', userId: (string)$userId),
+                $userScore,
+                $desc,
+                $user,
+                ruleKey: $ruleKey,
+                severity: $ruleSeverity
+            );
             return true;
         }
 
@@ -257,12 +305,61 @@ final class Guard
 
     // ------------------------------------------------------------------
 
-    private function evaluateUserBan(RequestContext $ctx, int $score, string $reason, mixed $userObject = null): void
-    {
+    private function evaluateUserPenalty(
+        RequestContext $ctx,
+        int $score,
+        string $reason,
+        mixed $userObject = null,
+        array $signals = [],
+        ?string $ruleKey = null,
+        ?string $severity = null
+    ): void {
         if (! ($this->config['user_ban']['enabled'] ?? true)) {
             return;
         }
 
+        $userId = $ctx->userId;
+        if (! $userId) {
+            return;
+        }
+
+        // Cek apakah pelanggaran termasuk kategori Critical / Hard Ban
+        $criticalRules = $this->config['user_ban']['critical_rules'] ?? ['sqli', 'malicious_upload', 'path_traversal'];
+        $banSeverities = $this->config['user_ban']['ban_severities'] ?? ['critical'];
+
+        $isCritical = false;
+
+        if ($ruleKey && in_array($ruleKey, $criticalRules, true)) {
+            $isCritical = true;
+        }
+
+        if ($severity && in_array($severity, $banSeverities, true)) {
+            $isCritical = true;
+        }
+
+        foreach ($signals as $signal) {
+            if (in_array($signal->detector, $criticalRules, true)) {
+                $isCritical = true;
+                break;
+            }
+            $ruleConfig = $this->config['rules'][$signal->detector] ?? [];
+            if (in_array($ruleConfig['severity'] ?? '', $banSeverities, true)) {
+                $isCritical = true;
+                break;
+            }
+        }
+
+        if ($isCritical) {
+            // TIER 2: HARD ACTION (Permanent Database Ban)
+            $this->evaluateUserBan($ctx, $score, $reason, $userObject);
+        } else {
+            // TIER 1: SOFT ACTION (Force Logout, reset score, akun database aman)
+            $this->evaluateUserForceLogout($ctx, $score, $reason, $userObject);
+        }
+    }
+
+    private function evaluateUserBan(RequestContext $ctx, int $score, string $reason, mixed $userObject = null): void
+    {
         $userId = $ctx->userId;
         if (! $userId) {
             return;
@@ -273,6 +370,24 @@ final class Guard
 
         if ($this->onUserBannedCallback !== null) {
             ($this->onUserBannedCallback)($userObject ?? $userId, $score, $reason, $ctx);
+        }
+    }
+
+    private function evaluateUserForceLogout(RequestContext $ctx, int $score, string $reason, mixed $userObject = null): void
+    {
+        $userId = $ctx->userId;
+        if (! $userId) {
+            return;
+        }
+
+        // Tandai user untuk diputus sesinya pada request aktif (10 menit)
+        $this->store->put("force_logout:user:{$userId}", 1, 600);
+
+        // Reset reputasi score user agar tidak terjebak loop setelah login kembali
+        $this->store->forget("score:user:{$userId}");
+
+        if ($this->onUserForceLoggedOutCallback !== null) {
+            ($this->onUserForceLoggedOutCallback)($userObject ?? $userId, $score, $reason, $ctx);
         }
     }
 
@@ -297,7 +412,25 @@ final class Guard
             $this->store->hit("score:ip:{$ctx->ip}", $ttl, $signal->score);
 
             if ($ctx->userId !== null) {
-                $this->store->hit("score:user:{$ctx->userId}", $ttl, $signal->score);
+                $ruleCaps = $this->config['user_ban']['rule_score_caps'] ?? [];
+                $cap = (int) ($ruleCaps[$signal->detector] ?? 0);
+                $ptsToAdd = $signal->score;
+
+                if ($cap > 0) {
+                    $current = $this->store->count("score:user:{$ctx->userId}:rule:{$signal->detector}");
+                    if ($current >= $cap) {
+                        $ptsToAdd = 0;
+                    } else {
+                        $ptsToAdd = min($ptsToAdd, $cap - $current);
+                    }
+                }
+
+                if ($ptsToAdd > 0) {
+                    if ($cap > 0) {
+                        $this->store->hit("score:user:{$ctx->userId}:rule:{$signal->detector}", $ttl, $ptsToAdd);
+                    }
+                    $this->store->hit("score:user:{$ctx->userId}", $ttl, $ptsToAdd);
+                }
             }
 
             // Catat ke Vulnerability Store sebagai insiden terdeteksi jika memiliki skor ancaman tinggi

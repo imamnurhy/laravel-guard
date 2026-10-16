@@ -5,6 +5,7 @@ namespace AppGuard\Handlers;
 use AppGuard\Core\Contracts\VulnerabilityStore;
 use AppGuard\Core\RequestContext;
 use AppGuard\Events\UserBanned;
+use AppGuard\Events\UserForceLoggedOut;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -87,9 +88,53 @@ class DefaultUserBanHandler
     }
 
     /**
+     * Eksekusi pemutusan sesi paksa (Soft Action) tanpa mengubah status akun di database.
+     */
+    public function handleForceLogout(mixed $user, int $score, string $reason, ?RequestContext $context = null): void
+    {
+        $userId = is_object($user) ? ($user->id ?? $user->getAuthIdentifier()) : $user;
+        $username = is_object($user) ? ($user->username ?? $user->email ?? (string)$userId) : (string)$userId;
+        $ip = $context?->ip ?? request()->ip() ?? '127.0.0.1';
+        $url = request()->fullUrl();
+
+        // 1. Simpan metadata pemutusan sesi di Cache sementara (15 menit)
+        Cache::put("guard:user_force_logout:{$userId}", [
+            'reason' => $reason,
+            'score' => $score,
+            'logged_out_at' => date('Y-m-d H:i:s'),
+            'ip' => $ip,
+        ], now()->addMinutes(15));
+
+        // 2. Trigger Event UserForceLoggedOut
+        event(new UserForceLoggedOut($user, $score, $reason, $context));
+
+        // 3. Catat telemetri sebagai medium severity event
+        if ($this->vulnerabilityStore !== null) {
+            $this->vulnerabilityStore->recordExposed([
+                'type' => 'user_force_logout',
+                'severity' => 'medium',
+                'rule_key' => 'user_force_logout',
+                'score' => $score,
+                'ip' => $ip,
+                'user_id' => $userId,
+                'username' => $username,
+                'method' => $context?->method ?? request()->method(),
+                'path' => $context?->path ?? request()->path(),
+                'payload' => [
+                    'reason' => $reason,
+                    'url' => $url,
+                ],
+                'response_status' => 403,
+                'reasons' => [$reason],
+                'timestamp' => date('Y-m-d H:i:s'),
+            ]);
+        }
+    }
+
+    /**
      * Putus sesi aktif secara paksa.
      */
-    public function forceLogout(Request $request, string $reason = 'Akun Anda dinonaktifkan oleh sistem keamanan.'): Response
+    public function forceLogout(Request $request, ?string $reason = null): Response
     {
         $user = $request->user();
         if ($user && method_exists($user, 'currentAccessToken') && $user->currentAccessToken()) {
@@ -104,12 +149,12 @@ class DefaultUserBanHandler
             $request->session()->regenerateToken();
         }
 
-        $message = 'Akun Anda telah dinonaktifkan oleh sistem keamanan karena aktivitas yang tidak wajar. Silakan hubungi Administrator jika ini merupakan kekeliruan.';
+        $message = $reason ?? 'Sesi Anda telah diakhiri demi keamanan karena aktivitas formulir terdeteksi tidak wajar. Silakan login kembali.';
 
         if ($request->expectsJson() || $request->isXmlHttpRequest()) {
             return new JsonResponse([
                 'success' => false,
-                'banned' => true,
+                'force_logout' => true,
                 'message' => $message,
             ], 403);
         }

@@ -76,9 +76,33 @@ return [
     | serta memutuskan sesi secara paksa (Force Logout).
     */
     'user_ban' => [
-        'enabled'   => env('GUARD_BAN_ENABLED', false),
+        'enabled'   => env('GUARD_BAN_ENABLED', true),
         'threshold' => (int) env('GUARD_BAN_THRESHOLD', 100),
         'duration'  => 604800,                                  // Durasi banned di cache (7 hari)
+
+        /*
+         | Rule atau severity yang berhak memicu mutasi status database (Tier 2: Hard Ban).
+         | Di luar daftar ini, user hanya diputus sesinya (Tier 1: Force Logout).
+         */
+        'critical_rules' => [
+            'sqli',
+            'malicious_upload',
+            'path_traversal',
+        ],
+        'ban_severities' => [
+            'critical',
+        ],
+
+        /*
+         | Batas akumulasi skor per rule dalam satu jendela waktu reputasi.
+         | Mencegah satu anomali ringan/sedang terulang berkali-kali hingga memicu ban.
+         */
+        'rule_score_caps' => [
+            'high_entropy'        => 35,
+            'parameter_tampering' => 70,
+            'scanner_fuzzing'     => 50,
+            'captcha_abuse'       => 35,
+        ],
 
         // Konfigurasi Model Eloquent aplikasi pengguna (ubah langsung di sini jika memakai custom model)
         'model' => App\Models\User::class,
@@ -114,38 +138,47 @@ return [
     'rules' => [
         'idor' => [
             'points'      => 25,
+            'severity'    => 'medium',
             'description' => 'Percobaan akses tidak sah pada data/berkas milik akun lain (IDOR)',
         ],
         'path_traversal' => [
             'points'      => 50,
+            'severity'    => 'critical',
             'description' => 'Percobaan Directory/Path Traversal pada penanganan berkas',
         ],
         'malicious_upload' => [
             'points'      => 50,
+            'severity'    => 'critical',
             'description' => 'Percobaan unggah berkas mencurigakan atau berbahaya',
         ],
         'sqli' => [
             'points'      => 100,                                                // Langsung auto-banned
+            'severity'    => 'critical',
             'description' => 'Percobaan eksploitasi SQL Injection terdeteksi',
         ],
         'xss' => [
             'points'      => 50,
+            'severity'    => 'high',
             'description' => 'Percobaan injeksi skrip berbahaya (XSS)',
         ],
         'parameter_tampering' => [
             'points'      => 35,
+            'severity'    => 'medium',
             'description' => 'Manipulasi parameter atau injeksi field sensitif (Parameter Tampering)',
         ],
         'captcha_abuse' => [
             'points'      => 35,
+            'severity'    => 'medium',
             'description' => 'Percobaan manipulasi atau replay token CAPTCHA secara tidak sah',
         ],
         'scanner_fuzzing' => [
             'points'      => 50,
+            'severity'    => 'medium',
             'description' => 'Aktivitas pemindaian celah / automated scanner fuzzing terdeteksi',
         ],
         'high_entropy' => [
             'points'      => 35,
+            'severity'    => 'low',
             'description' => 'Payload anomali dengan pola keacakan berlebih / obfuscation (Shannon Entropy)',
         ],
     ],

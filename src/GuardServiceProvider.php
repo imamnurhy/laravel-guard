@@ -158,10 +158,13 @@ class GuardServiceProvider extends ServiceProvider
                 $vulnStore
             );
 
-            // Hook callback user banned ke BanHandler
+            // Hook callback user banned & force logout ke BanHandler
             $banHandler = $app->make(DefaultUserBanHandler::class);
             $guard->setOnUserBanned(function ($user, $score, $reason, $ctx) use ($banHandler) {
                 $banHandler->ban($user, $score, $reason, $ctx);
+            });
+            $guard->setOnUserForceLoggedOut(function ($user, $score, $reason, $ctx) use ($banHandler) {
+                $banHandler->handleForceLogout($user, $score, $reason, $ctx);
             });
 
             return $guard;

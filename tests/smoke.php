@@ -39,6 +39,7 @@ $vulnStore = new MockVulnerabilityStore();
 $bf = new BruteForceDetector($store, $cfg['detectors']['brute_force']);
 
 $bannedUsers = [];
+$loggedOutUsers = [];
 $guard = new Guard($store, [
     new HoneypotDetector($cfg['detectors']['honeypot']),
     $bf,
@@ -51,6 +52,9 @@ $guard = new Guard($store, [
 
 $guard->setOnUserBanned(function ($user, $score, $reason) use (&$bannedUsers) {
     $bannedUsers[] = ['user' => $user, 'score' => $score, 'reason' => $reason];
+});
+$guard->setOnUserForceLoggedOut(function ($user, $score, $reason) use (&$loggedOutUsers) {
+    $loggedOutUsers[] = ['user' => $user, 'score' => $score, 'reason' => $reason];
 });
 
 $fail = 0;
@@ -101,21 +105,56 @@ check('nested parameter tampering (user[is_admin]) detected', $guard->inspect($c
     'inputs' => ['user' => ['is_admin' => 1]]
 ]))->score >= 35);
 
-// 7. Manual recordViolation (mis. IDOR dari Controller) & Auto-Banned trigger
-$userObj = (object)['id' => 999, 'username' => 'test_intruder'];
-$guard->recordViolation($userObj, 'idor', 25, 'Coba akses permohonan #1 milik akun lain');
-$guard->recordViolation($userObj, 'idor', 25, 'Coba akses permohonan #2 milik akun lain');
-$guard->recordViolation($userObj, 'idor', 25, 'Coba akses permohonan #3 milik akun lain');
-check('user not yet banned at 75 points', count($bannedUsers) === 0);
+// 7. Anomaly Detector: Valid JSON auto-bypass & Wildcard Safe Fields
+$jsonPayload = json_encode([
+    'rtdr_data' => [
+        'polygon' => 'POLYGON((106.68 -6.29, 106.69 -6.30, 106.70 -6.31, 106.68 -6.29))',
+        'attributes' => ['code' => 'RTDR_2026_X99', 'verified' => true, 'timestamp' => '2026-10-16T12:00:00Z'],
+        'meta' => 'Random long description with lots of varied symbols and characters to exceed 150 characters length easily.'
+    ]
+]);
+check('valid JSON string payload is auto-bypassed from high entropy', $guard->inspect($ctx('/perizinan/store', '16.16.16.16', null, '201', 'POST', [
+    'inputs' => ['rtdr_data' => $jsonPayload]
+]))->score === 0);
 
-$guard->recordViolation($userObj, 'idor', 25, 'Coba akses permohonan #4 milik akun lain');
-check('user auto-banned triggered at 100 points', count($bannedUsers) === 1 && $bannedUsers[0]['user']->id === 999);
-check('vulnerability store captured violations for ML', count($vulnStore->recorded) >= 4);
+$anomalyDetectorWithWildcard = new AnomalyDetector($store, [
+    'enabled' => true,
+    'safe_fields' => ['*alamat*', 'rtdr_data'],
+    'entropy_threshold' => 4.8,
+    'entropy_min_length' => 150,
+]);
+$guardWildcard = new Guard($store, [$anomalyDetectorWithWildcard], $cfg);
+$longAddress = 'Jalan Pahlawan Revolusi No. 45 RT 003 / RW 012 Kelurahan Pondok Jagung Timur Kecamatan Serpong Utara Gedung Menara Hijau Lantai 8 Tangerang Selatan Banten 15326';
+check('wildcard safe_fields (*alamat*) ignores perusahaan_alamat', $guardWildcard->inspect($ctx('/perizinan/store', '17.17.17.17', null, '202', 'POST', [
+    'inputs' => ['perusahaan_alamat' => $longAddress]
+]))->score === 0);
 
-// 8. Blocked user inspect
-check('banned user inspection is blocked', $guard->inspect($ctx('/dashboard', '15.15.15.15', null, '999'))->action === Action::Block);
+// 8. Tiered Defense: Non-critical repeated violation triggers Soft Force-Logout (NOT Hard Ban)
+$userNonCritical = (object)['id' => 999, 'username' => 'test_pemohon'];
+$guard->recordViolation($userNonCritical, 'idor', 25, 'Akses data #1');
+$guard->recordViolation($userNonCritical, 'idor', 25, 'Akses data #2');
+$guard->recordViolation($userNonCritical, 'idor', 25, 'Akses data #3');
+check('user not yet logged out at 75 points', count($loggedOutUsers) === 0 && count($bannedUsers) === 0);
 
-// 9. Allowlist (Exact IP & CIDR Subnet) & Manual unblock
+$guard->recordViolation($userNonCritical, 'idor', 25, 'Akses data #4');
+check('user force logout triggered at 100 points for non-critical violation', count($loggedOutUsers) === 1 && $loggedOutUsers[0]['user']->id === 999);
+check('user is NOT banned in database for non-critical violation', count($bannedUsers) === 0);
+
+// 9. Tiered Defense: Critical exploit (SQLi) triggers Hard Ban
+$userCritical = (object)['id' => 888, 'username' => 'sqli_attacker'];
+$guard->recordViolation($userCritical, 'sqli', 100, 'SQL Injection in login form');
+check('user hard-banned triggered for critical exploit (SQLi)', count($bannedUsers) === 1 && $bannedUsers[0]['user']->id === 888);
+check('banned user inspection is blocked', $guard->inspect($ctx('/dashboard', '18.18.18.18', null, '888'))->action === Action::Block);
+
+// 10. Rule Score Cap test: high_entropy cap at 35 points
+$userCap = (object)['id' => 777, 'username' => 'entropy_repeater'];
+$guard->recordViolation($userCap, 'high_entropy', 35, 'Keacakan tinggi #1');
+$guard->recordViolation($userCap, 'high_entropy', 35, 'Keacakan tinggi #2');
+$guard->recordViolation($userCap, 'high_entropy', 35, 'Keacakan tinggi #3');
+check('rule score cap prevents single anomaly from accumulating past cap (score is 35, not 105)', $guard->scoreOfUser(777) === 35);
+check('user not banned due to rule score cap', count(array_filter($bannedUsers, fn($b) => $b['user']->id === 777)) === 0);
+
+// 11. Allowlist (Exact IP & CIDR Subnet) & Manual unblock
 $cfg2 = $cfg;
 $cfg2['allowlist'] = ['9.9.9.9', '192.168.1.0/24'];
 $g2 = new Guard($store, [new HoneypotDetector($cfg['detectors']['honeypot'])], $cfg2);

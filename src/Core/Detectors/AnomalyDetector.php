@@ -27,8 +27,8 @@ final class AnomalyDetector extends AbstractDetector
         $signals = [];
 
         // 1. Cek Shannon Entropy pada input
-        $entropyThreshold = (float) ($this->config['entropy_threshold'] ?? 4.5);
-        $minLen = (int) ($this->config['entropy_min_length'] ?? 120);
+        $entropyThreshold = (float) ($this->config['entropy_threshold'] ?? 4.8);
+        $minLen = (int) ($this->config['entropy_min_length'] ?? 150);
         $safeFields = $this->config['safe_fields'] ?? [];
         $inputs = $ctx->attributes['inputs'] ?? [];
 
@@ -41,6 +41,11 @@ final class AnomalyDetector extends AbstractDetector
 
             // Abaikan Data URI file/gambar/dokumen umum
             if (str_starts_with($val, 'data:')) {
+                continue;
+            }
+
+            // Abaikan jika string merupakan payload JSON terstruktur yang valid
+            if ($this->isValidJson($val)) {
                 continue;
             }
 
@@ -60,6 +65,49 @@ final class AnomalyDetector extends AbstractDetector
     }
 
     /**
+     * Memeriksa apakah string merupakan JSON terstruktur valid (array atau object).
+     */
+    private function isValidJson(string $val): bool
+    {
+        $trimmed = trim($val);
+        $len = strlen($trimmed);
+        if ($len < 2) {
+            return false;
+        }
+
+        $first = $trimmed[0];
+        $last = $trimmed[$len - 1];
+
+        if (($first !== '{' || $last !== '}') && ($first !== '[' || $last !== ']')) {
+            return false;
+        }
+
+        if (function_exists('json_validate')) {
+            return json_validate($trimmed);
+        }
+
+        json_decode($trimmed);
+        return json_last_error() === JSON_ERROR_NONE;
+    }
+
+    /**
+     * Memeriksa apakah field cocok dengan daftar safe_fields (termasuk wildcard fnmatch).
+     */
+    private function isSafeField(string $key, string $fullKey, array $safeFields): bool
+    {
+        foreach ($safeFields as $pattern) {
+            if ($key === $pattern || $fullKey === $pattern) {
+                return true;
+            }
+            if (str_contains($pattern, '*') && (fnmatch($pattern, $key) || fnmatch($pattern, $fullKey))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Mengurai input bersarang menjadi flat array string.
      */
     private function flattenInputs(array $inputs, array $safeFields, string $prefix = ''): array
@@ -69,7 +117,7 @@ final class AnomalyDetector extends AbstractDetector
         foreach ($inputs as $key => $val) {
             $fullKey = $prefix === '' ? (string)$key : "{$prefix}.{$key}";
 
-            if (in_array($key, $safeFields, true) || in_array($fullKey, $safeFields, true)) {
+            if ($this->isSafeField((string)$key, $fullKey, $safeFields)) {
                 continue;
             }
 

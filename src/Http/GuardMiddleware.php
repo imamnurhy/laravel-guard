@@ -56,9 +56,15 @@ class GuardMiddleware
         }
 
         if (! $decision->isAllowed() && $this->guard->enforcing()) {
-            // Jika user terblokir dan sedang login, force logout seketika
-            if ($request->user() && in_array('user_ban', array_column($decision->signals, 'detector'), true)) {
-                return $this->banHandler->forceLogout($request, 'Akun Anda telah dinonaktifkan oleh sistem keamanan.');
+            // Jika user terblokir atau diputus sesinya dan sedang login, force logout seketika
+            if ($request->user()) {
+                $signalDetectors = array_column($decision->signals, 'detector');
+                if (in_array('user_ban', $signalDetectors, true)) {
+                    return $this->banHandler->forceLogout($request, 'Akun Anda telah dinonaktifkan oleh sistem keamanan.');
+                }
+                if (in_array('user_force_logout', $signalDetectors, true)) {
+                    return $this->banHandler->forceLogout($request, 'Sesi Anda telah diakhiri demi keamanan karena aktivitas formulir terdeteksi tidak wajar. Silakan login kembali.');
+                }
             }
 
             return $this->reject($request, $decision);
