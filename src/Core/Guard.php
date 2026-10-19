@@ -303,6 +303,52 @@ final class Guard
         return $this->store->count("score:user:{$userId}");
     }
 
+    public function unbanUser(string|int $userId): void
+    {
+        $this->store->forget("block:user:{$userId}");
+        $this->store->forget("guard:user_banned:{$userId}");
+        $this->store->forget("score:user:{$userId}");
+        $this->store->forget("force_logout:user:{$userId}");
+
+        $ruleCaps = $this->config['user_ban']['rule_score_caps'] ?? [];
+        foreach (array_keys($ruleCaps) as $ruleKey) {
+            $this->store->forget("score:user:{$userId}:rule:{$ruleKey}");
+        }
+
+        if (class_exists(\Illuminate\Support\Facades\Cache::class)) {
+            \Illuminate\Support\Facades\Cache::forget("block:user:{$userId}");
+            \Illuminate\Support\Facades\Cache::forget("guard:user_banned:{$userId}");
+            \Illuminate\Support\Facades\Cache::forget("score:user:{$userId}");
+            \Illuminate\Support\Facades\Cache::forget("force_logout:user:{$userId}");
+        }
+    }
+
+    public function isUserBanned(string|int $userId): bool
+    {
+        if ($this->store->has("block:user:{$userId}")) {
+            return true;
+        }
+
+        if (class_exists(\Illuminate\Support\Facades\Cache::class)) {
+            return \Illuminate\Support\Facades\Cache::has("block:user:{$userId}");
+        }
+
+        return false;
+    }
+
+    public function isUserForceLoggedOut(string|int $userId): bool
+    {
+        if ($this->store->has("force_logout:user:{$userId}")) {
+            return true;
+        }
+
+        if (class_exists(\Illuminate\Support\Facades\Cache::class)) {
+            return \Illuminate\Support\Facades\Cache::has("force_logout:user:{$userId}");
+        }
+
+        return false;
+    }
+
     // ------------------------------------------------------------------
 
     private function evaluateUserPenalty(

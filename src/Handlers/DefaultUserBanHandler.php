@@ -88,6 +88,49 @@ class DefaultUserBanHandler
     }
 
     /**
+     * Buka blokir akun user di cache dan opsional sinkronkan status ke database.
+     */
+    public function unban(mixed $user, bool $syncDb = false): void
+    {
+        $userId = is_object($user) ? ($user->id ?? $user->getAuthIdentifier()) : $user;
+        if (! $userId) {
+            return;
+        }
+
+        // 1. Bersihkan seluruh key cache pemblokiran dan reputasi
+        Cache::forget("block:user:{$userId}");
+        Cache::forget("guard:user_banned:{$userId}");
+        Cache::forget("score:user:{$userId}");
+        Cache::forget("force_logout:user:{$userId}");
+
+        // 2. Sinkronkan pemulihan status di database jika diminta
+        if ($syncDb) {
+            $modelClass = config('guard.user_ban.model');
+            $attributes = config('guard.user_ban.attributes', []);
+
+            if ($modelClass && class_exists($modelClass) && !empty($attributes)) {
+                $unbanAttributes = [];
+                foreach ($attributes as $col => $val) {
+                    $unbanAttributes[$col] = is_int($val) ? 0 : (is_bool($val) ? false : 0);
+                }
+
+                try {
+                    $modelClass::whereKey($userId)->update($unbanAttributes);
+                    if (is_object($user)) {
+                        foreach ($unbanAttributes as $col => $val) {
+                            if (isset($user->{$col})) {
+                                $user->{$col} = $val;
+                            }
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    Log::channel(config('guard.log_channel'))->error("[AppGuard] Failed to reset user status attributes on unban: " . $e->getMessage());
+                }
+            }
+        }
+    }
+
+    /**
      * Eksekusi pemutusan sesi paksa (Soft Action) tanpa mengubah status akun di database.
      */
     public function handleForceLogout(mixed $user, int $score, string $reason, ?RequestContext $context = null): void

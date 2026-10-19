@@ -17,6 +17,9 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool isBlocked(string $ip)
  * @method static int scoreOf(string $ip)
  * @method static int scoreOfUser(string|int $userId)
+ * @method static void unbanUser(string|int $userId)
+ * @method static bool isUserBanned(string|int $userId)
+ * @method static bool isUserForceLoggedOut(string|int $userId)
  *
  * @see \AppGuard\Core\Guard
  */

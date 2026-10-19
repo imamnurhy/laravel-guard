@@ -19,6 +19,9 @@ use AppGuard\Console\ShipTelemetryCommand;
 use AppGuard\Console\StatusCommand;
 use AppGuard\Console\SyncCommand;
 use AppGuard\Console\UnblockCommand;
+use AppGuard\Console\UnbanUserCommand;
+use AppGuard\Console\UserStatusCommand;
+use AppGuard\Console\BanUserCommand;
 use AppGuard\Core\ControlPlaneClient;
 use AppGuard\Handlers\DefaultUserBanHandler;
 use AppGuard\Http\GuardMiddleware;
@@ -216,6 +219,9 @@ class GuardServiceProvider extends ServiceProvider
                 SyncCommand::class,
                 ShipTelemetryCommand::class,
                 HeartbeatCommand::class,
+                UnbanUserCommand::class,
+                UserStatusCommand::class,
+                BanUserCommand::class,
             ]);
         }
     }

@@ -167,5 +167,12 @@ check('manual block', $guard->inspect($ctx('/', '7.7.7.7'))->action === Action::
 $guard->unblock('7.7.7.7');
 check('unblock', $guard->inspect($ctx('/', '7.7.7.7'))->action === Action::Allow);
 
+// 12. unbanUser & isUserBanned tests
+check('user 888 is initially banned', $guard->isUserBanned(888) === true);
+$guard->unbanUser(888);
+check('user 888 is not banned after unbanUser', $guard->isUserBanned(888) === false);
+check('user 888 score is reset to 0', $guard->scoreOfUser(888) === 0);
+check('user 888 inspection is allowed after unban', $guard->inspect($ctx('/dashboard', '18.18.18.18', null, '888'))->action === Action::Allow);
+
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);
