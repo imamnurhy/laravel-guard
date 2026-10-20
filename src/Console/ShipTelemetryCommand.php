@@ -12,7 +12,8 @@ final class ShipTelemetryCommand extends Command
 
     public function handle(ControlPlaneClient $client): int
     {
-        $filePath = config('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'));
+        $rawPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard'));
+        $filePath = \AppGuard\Stores\JsonFileVulnerabilityStore::resolveFilePath($rawPath);
 
         if (! file_exists($filePath) || filesize($filePath) === 0) {
             $this->info('Buffer insiden kosong. Tidak ada data yang dikirim.');

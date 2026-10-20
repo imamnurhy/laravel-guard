@@ -48,7 +48,8 @@ final class DoctorCommand extends Command
         ];
 
         // 4. Direktori dataset JSONL
-        $datasetPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'));
+        $rawDatasetPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard'));
+        $datasetPath = \AppGuard\Stores\JsonFileVulnerabilityStore::resolveFilePath($rawDatasetPath);
         $datasetDir = dirname($datasetPath);
         $dirWritable = is_dir($datasetDir) ? is_writable($datasetDir) : is_writable(dirname($datasetDir));
         $checks[] = [

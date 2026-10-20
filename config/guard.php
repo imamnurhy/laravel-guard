@@ -176,11 +176,13 @@ return [
     |--------------------------------------------------------------------------
     | Menyimpan bukti percobaan serangan yang tervalidasi ke dalam berkas JSONL
     | untuk kebutuhan audit keamanan internal dan pelatihan model Machine Learning.
+    | Anda cukup menentukan direktori penyimpanannya saja (nama 'vulnerabilities.jsonl'
+    | akan otomatis ditambahkan), atau dapat menyertakan nama berkas secara penuh.
     */
     'vulnerability' => [
         // Driver penyimpanan insiden: 'jsonl' (file), 'array' (in-memory test), atau 'null' (nonaktif)
         'driver'       => env('GUARD_VULNERABILITY_DRIVER', 'jsonl'),
-        'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard/vulnerabilities.jsonl')),
+        'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard')),
     ],
 
 
