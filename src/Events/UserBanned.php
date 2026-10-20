@@ -15,6 +15,10 @@ final class UserBanned
         public readonly int $score,
         public readonly string $reason,
         public readonly ?RequestContext $context = null,
+        public readonly int $bannedAt = 0,
+        public readonly ?int $expiresAt = null,
+        public readonly ?string $detector = null,
+        public readonly ?string $tenant = null,
     ) {
     }
 }

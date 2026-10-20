@@ -2,6 +2,7 @@
 
 namespace AppGuard\Http;
 
+use AppGuard\Attributes\GuardProfile;
 use AppGuard\Core\Action;
 use AppGuard\Core\Decision;
 use AppGuard\Core\Guard;
@@ -10,6 +11,8 @@ use AppGuard\RequestContextFactory;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use ReflectionClass;
+use ReflectionMethod;
 use Symfony\Component\HttpFoundation\Response;
 use Throwable;
 
@@ -28,7 +31,7 @@ class GuardMiddleware
         private DefaultUserBanHandler $banHandler
     ) {}
 
-    public function handle(Request $request, Closure $next, ?string $profile = null): Response
+    public function handle(Request $request, Closure $next, string ...$parameters): Response
     {
         if (! $this->guard->enabled()) {
             return $next($request);
@@ -45,8 +48,13 @@ class GuardMiddleware
             }
         }
 
+        $overrides = array_merge(
+            $this->extractAttributeOverrides($request),
+            $this->parseMiddlewareParameters($parameters),
+        );
+
         try {
-            $decision = $this->guard->inspect($this->factory->make($request));
+            $decision = $this->guard->inspect($this->factory->make($request), $overrides);
         } catch (Throwable $e) {
             report($e);
 
@@ -55,7 +63,11 @@ class GuardMiddleware
                 : new Response('Service Unavailable', 503);
         }
 
-        if (! $decision->isAllowed() && $this->guard->enforcing()) {
+        $effectiveEnforcing = isset($overrides['mode'])
+            ? $overrides['mode'] === 'enforce'
+            : $this->guard->enforcing();
+
+        if (! $decision->isAllowed() && $effectiveEnforcing) {
             // Jika user terblokir atau diputus sesinya dan sedang login, force logout seketika
             if ($request->user()) {
                 $signalDetectors = array_column($decision->signals, 'detector');
@@ -88,6 +100,13 @@ class GuardMiddleware
 
     private function reject(Request $request, Decision $decision): Response
     {
+        if ($responder = $this->guard->customResponder()) {
+            $custom = $responder($request, $decision);
+            if ($custom instanceof Response) {
+                return $custom;
+            }
+        }
+
         $throttled = $decision->action === Action::Throttle;
         $status = $throttled ? 429 : 403;
         $headers = $throttled ? ['Retry-After' => (string) $decision->retryAfter] : [];
@@ -96,5 +115,100 @@ class GuardMiddleware
         return $request->expectsJson()
             ? new JsonResponse(['message' => $throttled ? 'Too Many Requests.' : 'Forbidden.'], $status, $headers)
             : new Response($throttled ? 'Too Many Requests' : 'Forbidden', $status, $headers);
+    }
+
+    /**
+     * Parse parameter middleware seperti `guard:strict,threshold=60` atau `guard:waf,honeypot,mode=monitor`.
+     *
+     * @param string[] $parameters
+     * @return array<string, mixed>
+     */
+    public function parseMiddlewareParameters(array $parameters): array
+    {
+        $overrides = [];
+        $detectors = [];
+        $knownProfiles = array_merge(['strict', 'balanced', 'monitor'], array_keys((array) config('guard.profiles', [])));
+
+        foreach ($parameters as $raw) {
+            $token = trim($raw);
+            if ($token === '') {
+                continue;
+            }
+
+            if ($token === 'bypass' || $token === 'off') {
+                $overrides['bypass'] = true;
+                continue;
+            }
+
+            if (str_contains($token, '=')) {
+                [$k, $v] = array_map('trim', explode('=', $token, 2));
+                $k = strtolower($k);
+                if ($k === 'threshold' || $k === 'block') {
+                    $overrides['block'] = (int) $v;
+                } elseif ($k === 'throttle') {
+                    $overrides['throttle'] = (int) $v;
+                } elseif ($k === 'mode') {
+                    $overrides['mode'] = strtolower($v);
+                } elseif ($k === 'profile') {
+                    $overrides['profile'] = $v;
+                } elseif ($k === 'detectors' || $k === 'detector') {
+                    foreach (explode('|', $v) as $d) {
+                        if (trim($d) !== '') {
+                            $detectors[] = trim($d);
+                        }
+                    }
+                }
+                continue;
+            }
+
+            if (in_array($token, $knownProfiles, true) && ! isset($overrides['profile'])) {
+                $overrides['profile'] = $token;
+                if ($token === 'monitor') {
+                    $overrides['mode'] = 'monitor';
+                }
+            } else {
+                $detectors[] = $token;
+            }
+        }
+
+        if ($detectors !== []) {
+            $overrides['detectors'] = array_values(array_unique($detectors));
+        }
+
+        return $overrides;
+    }
+
+    /** @return array<string, mixed> */
+    private function extractAttributeOverrides(Request $request): array
+    {
+        $route = $request->route();
+        if (! $route) {
+            return [];
+        }
+
+        try {
+            $controller = $route->getController();
+            $method = $route->getActionMethod();
+            if (! is_object($controller)) {
+                return [];
+            }
+
+            $overrides = [];
+            $refClass = new ReflectionClass($controller);
+            foreach ($refClass->getAttributes(GuardProfile::class) as $attr) {
+                $overrides = array_merge($overrides, $attr->newInstance()->toOverrides());
+            }
+
+            if ($method && $refClass->hasMethod($method)) {
+                $refMethod = new ReflectionMethod($controller, $method);
+                foreach ($refMethod->getAttributes(GuardProfile::class) as $attr) {
+                    $overrides = array_merge($overrides, $attr->newInstance()->toOverrides());
+                }
+            }
+
+            return $overrides;
+        } catch (Throwable) {
+            return [];
+        }
     }
 }

@@ -38,6 +38,72 @@ if ($permohonan->user_id !== auth()->id()) {
 
 ---
 
+## 🎛️ Cookbook Penggunaan Fleksibel
+
+### 1. Parameter Middleware Per-Route / Group & `#[GuardProfile]`
+```php
+use AppGuard\Attributes\GuardProfile;
+
+// Pilih profile preset, batasi detektor, atau ubah ambang skor langsung di route:
+Route::middleware('guard:strict')->group(...);
+Route::post('/webhook/payment', ...)->middleware('guard:bypass');
+Route::post('/search', ...)->middleware('guard:waf,threshold=60,mode=monitor');
+
+// Atau gunakan PHP Attribute pada Controller / Method:
+#[GuardProfile('strict', block: 60)]
+class CheckoutController extends Controller
+{
+    #[GuardProfile(mode: 'monitor', detectors: ['honeypot', 'malicious_payload'])]
+    public function preview() { ... }
+}
+```
+
+### 2. Monitoring & Operasional CLI via Artisan
+
+AppGuard menyediakan serangkaian perintah CLI lengkap untuk monitoring, pengujian, sinkronisasi, dan manajemen keamanan:
+
+```bash
+# === Manajemen Ban Terpadu (IP & User) ===
+php artisan guard:ban                       # Tabel daftar IP & user yang sedang diban
+php artisan guard:ban list --type=ip        # Filter daftar berdasarkan tipe (ip / user)
+php artisan guard:ban show 203.0.113.50     # Detail mendalam status & reputasi IP / user
+php artisan guard:ban check 203.0.113.50    # Cek cepat (exit code non-zero jika terblokir - cocok untuk CI/Script)
+php artisan guard:ban stats                 # Statistik agregat ban aktif & grafik mini proporsi detektor
+php artisan guard:ban unban 203.0.113.50    # Buka blokir (interaktif jika subject dikosongkan)
+php artisan guard:ban sync                  # Rekonsiliasi indeks ban lokal Redis ↔ Control Plane
+
+# === Diagnostik & Dry-Run Pengujian ===
+php artisan guard:doctor                    # Health check konfigurasi, koneksi cache/Redis, dataset, & Control Plane
+php artisan guard:test-rule /search --input="q=' union select 1--" # Uji coba payload terhadap detektor (tanpa simpan ke Redis)
+
+# === Manajemen Status & Pemblokiran IP ===
+php artisan guard:status {ip?}              # Cek status global sistem atau status spesifik IP
+php artisan guard:block {ip} --minutes=60   # Blokir IP manual secara instan
+php artisan guard:unblock {ip}              # Hapus blokir IP manual & reset reputasi
+
+# === Manajemen Pemblokiran User (Akun) ===
+php artisan guard:user-status {userId}      # Cek status ban, skor reputasi, & kolom status database user
+php artisan guard:ban-user {userId} --reason="Aktivitas mencurigakan" # Blokir akun user di cache & database
+php artisan guard:unban-user {userId} --sync-db # Buka blokir user di cache & pulihkan status di database
+
+# === Sinkronisasi & Integrasi Control Plane ===
+php artisan guard:sync                      # Tarik aturan dinamis, honeypots baru, & remote policy
+php artisan guard:ship-telemetry            # Kirim batch rekaman insiden (vulnerabilities.jsonl) ke Control Plane
+php artisan guard:heartbeat                 # Kirim sinyal heartbeat status kesehatan sensor ke Control Plane
+```
+
+### 3. Event Hook, Custom Responder, & Resolver
+```php
+use AppGuard\Facades\SecurityGuard;
+
+SecurityGuard::onBan(fn ($ban) => logger()->warning("Banned {$ban->id()}"));
+SecurityGuard::onBanLifted(fn ($type, $subject, $by) => logger()->info("Unbanned {$type}:{$subject} by {$by}"));
+SecurityGuard::respondUsing(fn ($request, $decision) => response()->json(['blocked' => true], 403));
+SecurityGuard::resolveTenantUsing(fn ($request) => $request->header('X-Tenant-Id'));
+```
+
+---
+
 ## 📚 Indeks Dokumentasi Lengkap
 
 Untuk panduan mendalam dan spesifikasi teknis, silakan merujuk pada dokumen berikut:

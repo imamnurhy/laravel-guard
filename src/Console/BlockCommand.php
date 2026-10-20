@@ -7,12 +7,17 @@ use Illuminate\Console\Command;
 
 final class BlockCommand extends Command
 {
-    protected $signature = 'guard:block {ip} {--minutes=60}';
+    protected $signature = 'guard:block {ip} {--minutes=60} {--reason=Manual CLI block}';
     protected $description = 'Blokir IP secara manual';
 
     public function handle(Guard $guard): int
     {
-        $guard->block($this->argument('ip'), (int) $this->option('minutes') * 60);
+        $guard->block(
+            $this->argument('ip'),
+            (int) $this->option('minutes') * 60,
+            (string) $this->option('reason'),
+            'cli',
+        );
         $this->info("Blocked {$this->argument('ip')} for {$this->option('minutes')} minutes.");
 
         return self::SUCCESS;

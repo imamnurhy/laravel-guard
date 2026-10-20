@@ -25,6 +25,10 @@ return [
     // Driver cache untuk penyimpanan skor reputasi (null = mengikuti cache default Laravel, disarankan 'redis')
     'store' => env('GUARD_CACHE_STORE'),
 
+    // Prefix key di cache/Redis serta opsi namespace otomatis per tenant (app_key)
+    'key_prefix' => env('GUARD_KEY_PREFIX', 'guard:'),
+    'prefix_by_tenant' => env('GUARD_PREFIX_BY_TENANT', false),
+
     // Channel log Laravel untuk pencatatan event keamanan (null = default logging channel)
     'log_channel' => env('GUARD_LOG_CHANNEL'),
 
@@ -57,6 +61,16 @@ return [
         // '127.0.0.1',
     ],
 
+    // Pengecualian (Exclusion) multi-dimensi dari inspeksi WAF
+    'exclusions' => [
+        'ips'     => [], // ['10.0.0.0/8']
+        'paths'   => [], // ['health', 'up', 'webhook/*']
+        'fields'  => [], // ['content_html', '*signature*'] — diabaikan oleh semua detektor input
+        'headers' => [], // ['x-internal-probe' => 'secret']
+        'users'   => [], // [1, 'admin-uuid']
+        'roles'   => [], // ['superadmin']
+    ],
+
 
     /*
     |--------------------------------------------------------------------------
@@ -71,12 +85,25 @@ return [
         'block'    => (int) env('GUARD_BLOCK', 100),
     ],
 
-    // Ambang batas khusus untuk endpoint sensitif (pencocokan path menggunakan wildcard fnmatch)
+    // Ambang batas khusus untuk endpoint sensitif & preset siap pakai (strict, balanced, monitor)
     'profiles' => [
         'strict' => [
             'throttle' => 30,
             'block'    => 70,
+            'mode'     => 'enforce',
             'paths'    => ['login', 'register', 'password/*', 'api/login', 'api/auth/*'],
+        ],
+        'balanced' => [
+            'throttle' => 50,
+            'block'    => 100,
+            'mode'     => 'enforce',
+            'paths'    => [],
+        ],
+        'monitor' => [
+            'throttle' => 50,
+            'block'    => 100,
+            'mode'     => 'monitor',
+            'paths'    => [],
         ],
     ],
 
@@ -151,7 +178,9 @@ return [
     | untuk kebutuhan audit keamanan internal dan pelatihan model Machine Learning.
     */
     'vulnerability' => [
-        'dataset_path' => storage_path('app/guard/vulnerabilities.jsonl'),
+        // Driver penyimpanan insiden: 'jsonl' (file), 'array' (in-memory test), atau 'null' (nonaktif)
+        'driver'       => env('GUARD_VULNERABILITY_DRIVER', 'jsonl'),
+        'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard/vulnerabilities.jsonl')),
     ],
 
 

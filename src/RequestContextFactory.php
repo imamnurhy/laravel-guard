@@ -7,8 +7,26 @@ use Illuminate\Http\Request;
 
 final class RequestContextFactory
 {
+    /** @var null|callable(Request): mixed */
+    private $userResolver = null;
+
+    /** @var null|callable(Request): ?string */
+    private $tenantResolver = null;
+
     public function __construct(private array $config = [])
     {
+    }
+
+    public function resolveUserUsing(?callable $resolver): self
+    {
+        $this->userResolver = $resolver;
+        return $this;
+    }
+
+    public function resolveTenantUsing(?callable $resolver): self
+    {
+        $this->tenantResolver = $resolver;
+        return $this;
     }
 
     /**
@@ -17,9 +35,33 @@ final class RequestContextFactory
     public function make(Request $request, bool $withUser = false): RequestContext
     {
         $userId = null;
-        if (($withUser || $request->user()) && ($user = $request->user())) {
-            $userId = (string) $user->getAuthIdentifier();
+        $roles = [];
+        $user = $this->userResolver !== null
+            ? ($this->userResolver)($request)
+            : (($withUser || $request->user()) ? $request->user() : null);
+
+        if ($user !== null) {
+            if (is_object($user)) {
+                $userId = (string) ($user->id ?? (method_exists($user, 'getAuthIdentifier') ? $user->getAuthIdentifier() : ''));
+                if (isset($user->role) && is_scalar($user->role)) {
+                    $roles[] = (string) $user->role;
+                }
+                if (method_exists($user, 'getRoleNames')) {
+                    try {
+                        foreach ($user->getRoleNames() as $r) {
+                            $roles[] = (string) $r;
+                        }
+                    } catch (\Throwable) {
+                    }
+                }
+            } elseif (is_scalar($user)) {
+                $userId = (string) $user;
+            }
         }
+
+        $tenant = $this->tenantResolver !== null
+            ? ($this->tenantResolver)($request)
+            : ($this->config['control_plane']['app_key'] ?? null);
 
         $trapFields = array_values(array_filter(
             $this->config['detectors']['honeypot']['fields'] ?? [],
@@ -42,11 +84,14 @@ final class RequestContextFactory
             path: rawurldecode($request->getPathInfo()),
             userAgent: (string) $request->userAgent(),
             routeName: $request->route()?->getName(),
-            userId: $userId,
+            userId: $userId !== '' ? $userId : null,
             identifier: $this->identifier($request),
             attributes: [
                 'honeypot_fields' => $trapFields,
                 'inputs' => $inputs,
+                'headers' => $request->headers->all(),
+                'roles' => array_values(array_unique($roles)),
+                'tenant' => $tenant,
                 'route_parameters' => $request->route()?->parameters() ?? [],
                 'sensor_token' => $sensorToken,
             ],

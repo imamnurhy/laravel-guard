@@ -2,6 +2,8 @@
 
 namespace AppGuard\Handlers;
 
+use AppGuard\Core\BanRecord;
+use AppGuard\Core\Contracts\BanRegistry;
 use AppGuard\Core\Contracts\VulnerabilityStore;
 use AppGuard\Core\RequestContext;
 use AppGuard\Events\UserBanned;
@@ -15,8 +17,10 @@ use Symfony\Component\HttpFoundation\Response;
 
 class DefaultUserBanHandler
 {
-    public function __construct(private ?VulnerabilityStore $vulnerabilityStore = null)
-    {
+    public function __construct(
+        private ?VulnerabilityStore $vulnerabilityStore = null,
+        private ?BanRegistry $banRegistry = null,
+    ) {
     }
 
     /**
@@ -58,22 +62,53 @@ class DefaultUserBanHandler
         ], now()->addDays(7));
 
         // Sinkronisasi dengan key block:user: yang dibaca Guard::inspect
-        Cache::put("block:user:{$userId}", 1, now()->addDays(7));
+        $ttl = (int) config('guard.user_ban.duration', 604800);
+        Cache::put("block:user:{$userId}", 1, now()->addSeconds($ttl));
+
+        if ($this->banRegistry !== null && $userId !== null && $userId !== '') {
+            $now = time();
+            $this->banRegistry->record(new BanRecord(
+                type: BanRecord::TYPE_USER,
+                subject: (string) $userId,
+                reason: $reason,
+                source: $context ? 'user_ban' : 'manual',
+                score: $score,
+                bannedAt: $now,
+                expiresAt: $ttl > 0 ? $now + $ttl : null,
+                ip: $ip,
+                meta: array_filter(['label' => $username !== (string) $userId ? $username : null, 'url' => $url]),
+            ));
+        }
 
         // 3. Trigger Laravel Event agar aplikasi induk bisa menjalankan custom hook
-        event(new UserBanned($user, $score, $reason, $context));
+        $now = time();
+        $expiresAt = $ttl > 0 ? $now + $ttl : null;
+        $tenant = (string) ($context->attributes['tenant'] ?? config('guard.control_plane.app_key', ''));
+        event(new UserBanned(
+            user: $user,
+            score: $score,
+            reason: $reason,
+            context: $context,
+            bannedAt: $now,
+            expiresAt: $expiresAt,
+            detector: 'user_ban',
+            tenant: $tenant !== '' ? $tenant : null,
+        ));
 
         // 4. Catat ke Vulnerability Store / Buffer telemetri agar segera dikirim ke Control Plane
         // Notifikasi darurat (Telegram/Tebot) sepenuhnya ditangani oleh Control Plane secara terpusat
         if ($this->vulnerabilityStore !== null) {
             $this->vulnerabilityStore->recordExposed([
-                'type' => 'user_banned',
+                'type' => 'ban.created',
+                'ban_type' => BanRecord::TYPE_USER,
                 'severity' => 'critical',
                 'rule_key' => 'user_ban',
                 'score' => $score,
                 'ip' => $ip,
                 'user_id' => $userId,
+                'subject' => (string) $userId,
                 'username' => $username,
+                'tenant' => $tenant !== '' ? $tenant : null,
                 'method' => $context?->method ?? request()->method(),
                 'path' => $context?->path ?? request()->path(),
                 'payload' => [
@@ -82,7 +117,9 @@ class DefaultUserBanHandler
                 ],
                 'response_status' => 403,
                 'reasons' => [$reason],
-                'timestamp' => date('Y-m-d H:i:s'),
+                'banned_at' => date('Y-m-d H:i:s', $now),
+                'expires_at' => $expiresAt ? date('Y-m-d H:i:s', $expiresAt) : null,
+                'timestamp' => date('Y-m-d H:i:s', $now),
             ]);
         }
     }
@@ -102,6 +139,10 @@ class DefaultUserBanHandler
         Cache::forget("guard:user_banned:{$userId}");
         Cache::forget("score:user:{$userId}");
         Cache::forget("force_logout:user:{$userId}");
+
+        if ($this->banRegistry !== null) {
+            $this->banRegistry->remove(BanRecord::TYPE_USER, (string) $userId);
+        }
 
         // 2. Sinkronkan pemulihan status di database jika diminta
         if ($syncDb) {

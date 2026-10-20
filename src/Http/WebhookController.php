@@ -58,6 +58,14 @@ class WebhookController
                             $existing[] = $data['ip'];
                             Cache::put($bannedKey, $existing, 86400 * 7);
                         }
+                        if (app()->bound(\AppGuard\Core\Guard::class)) {
+                            app(\AppGuard\Core\Guard::class)->block(
+                                (string) $data['ip'],
+                                (int) ($data['ttl'] ?? 86400 * 7),
+                                (string) ($data['reason'] ?? 'Control Plane Webhook Ban'),
+                                'webhook',
+                            );
+                        }
                     }
                     break;
 
@@ -67,6 +75,9 @@ class WebhookController
                         $existing = (array) Cache::get($bannedKey, []);
                         $filtered = array_values(array_filter($existing, fn ($ip) => $ip !== $data['ip']));
                         Cache::put($bannedKey, $filtered, 86400 * 7);
+                        if (app()->bound(\AppGuard\Core\Guard::class)) {
+                            app(\AppGuard\Core\Guard::class)->unblock((string) $data['ip']);
+                        }
                     }
                     break;
 
@@ -79,6 +90,22 @@ class WebhookController
                                 $banHandler = app(DefaultUserBanHandler::class);
                                 $banHandler->ban($user, 100, $data['reason'] ?? 'Manual SOC Webhook Ban', null);
                             }
+                        }
+                    }
+                    break;
+
+                case 'unban_user':
+                    if (! empty($data['user_id'])) {
+                        $userId = (string) $data['user_id'];
+                        if (app()->bound(\AppGuard\Core\Guard::class)) {
+                            app(\AppGuard\Core\Guard::class)->unbanUser(
+                                $userId,
+                                (string) ($data['lifted_by'] ?? 'control_plane'),
+                                (string) ($data['reason'] ?? 'Control Plane Webhook Unban'),
+                            );
+                        }
+                        if (app()->bound(DefaultUserBanHandler::class)) {
+                            app(DefaultUserBanHandler::class)->unban($userId, syncDb: (bool) ($data['sync_db'] ?? true));
                         }
                     }
                     break;

@@ -11,7 +11,9 @@ spl_autoload_register(function ($c) {
 function env($k, $d = null) { return $d; }
 function storage_path($p = '') { return sys_get_temp_dir() . '/' . $p; }
 
-use AppGuard\Core\{Action, Guard, RequestContext};
+use AppGuard\Attributes\GuardProfile;
+use AppGuard\Core\{Action, BanRecord, Guard, RequestContext, Signal};
+use AppGuard\Core\Contracts\Detector;
 use AppGuard\Core\Detectors\{
     AnomalyDetector,
     BruteForceDetector,
@@ -21,7 +23,7 @@ use AppGuard\Core\Detectors\{
     ParameterTamperingDetector,
     PathTraversalDetector
 };
-use AppGuard\Core\Stores\ArrayStore;
+use AppGuard\Core\Stores\{ArrayBanRegistry, ArrayStore, ArrayVulnerabilityStore, NullVulnerabilityStore};
 use AppGuard\Core\Contracts\VulnerabilityStore;
 
 class MockVulnerabilityStore implements VulnerabilityStore
@@ -35,6 +37,7 @@ $cfg = require __DIR__ . '/../config/guard.php';
 $cfg['mode'] = 'enforce';
 $cfg['enabled'] = true;
 $store = new ArrayStore();
+$banRegistry = new ArrayBanRegistry();
 $vulnStore = new MockVulnerabilityStore();
 $bf = new BruteForceDetector($store, $cfg['detectors']['brute_force']);
 
@@ -48,7 +51,7 @@ $guard = new Guard($store, [
     new MaliciousPayloadDetector($cfg['detectors']['malicious_payload']),
     new ParameterTamperingDetector($cfg['detectors']['parameter_tampering']),
     new AnomalyDetector($store, $cfg['detectors']['anomaly']),
-], $cfg, null, $vulnStore);
+], $cfg, null, $vulnStore, $banRegistry);
 
 $guard->setOnUserBanned(function ($user, $score, $reason) use (&$bannedUsers) {
     $bannedUsers[] = ['user' => $user, 'score' => $score, 'reason' => $reason];
@@ -169,10 +172,85 @@ check('unblock', $guard->inspect($ctx('/', '7.7.7.7'))->action === Action::Allow
 
 // 12. unbanUser & isUserBanned tests
 check('user 888 is initially banned', $guard->isUserBanned(888) === true);
+check('user 888 recorded in BanRegistry', $guard->findBan(BanRecord::TYPE_USER, 888) !== null);
 $guard->unbanUser(888);
 check('user 888 is not banned after unbanUser', $guard->isUserBanned(888) === false);
+check('user 888 removed from BanRegistry after unbanUser', $guard->findBan(BanRecord::TYPE_USER, 888) === null);
 check('user 888 score is reset to 0', $guard->scoreOfUser(888) === 0);
 check('user 888 inspection is allowed after unban', $guard->inspect($ctx('/dashboard', '18.18.18.18', null, '888'))->action === Action::Allow);
+
+// 13. BanRegistry index: block, list, filter by type, unblock
+$liftedEvents = [];
+$banEvents = [];
+$guard->onBan(function (BanRecord $b) use (&$banEvents) { $banEvents[] = $b; });
+$guard->onBanLifted(function (string $type, string $sub, string $by) use (&$liftedEvents) { $liftedEvents[] = "{$type}:{$sub}:{$by}"; });
+
+$guard->block('203.0.113.50', 300, 'Brute force SSH', 'manual', 100);
+$ipBan = $guard->findBan(BanRecord::TYPE_IP, '203.0.113.50');
+check('IP block recorded in BanRegistry with metadata', $ipBan !== null && $ipBan->reason === 'Brute force SSH' && ($ipBan->remaining() ?? 0) > 0);
+check('onBan callback fired for IP block', count($banEvents) === 1 && $banEvents[0]->subject === '203.0.113.50');
+check('Guard::bans filters by type IP', isset($guard->bans(BanRecord::TYPE_IP)['ip:203.0.113.50']));
+$guard->unblock('203.0.113.50', 'cli_admin', 'False positive');
+check('IP unblock removes entry from BanRegistry', $guard->findBan(BanRecord::TYPE_IP, '203.0.113.50') === null);
+check('onBanLifted callback fired with liftedBy', in_array('ip:203.0.113.50:cli_admin', $liftedEvents, true));
+
+// 14. Profile overrides, monitor-only mode, detector filtering, and GuardProfile attribute
+$attr = new GuardProfile('strict', block: 40, mode: 'monitor', detectors: ['honeypot']);
+$ov = $attr->toOverrides();
+check('GuardProfile attribute converts to overrides', $ov['profile'] === 'strict' && $ov['block'] === 40 && $ov['mode'] === 'monitor');
+
+$monDecision = $guard->inspect($ctx('/.env', '198.51.100.77'), ['mode' => 'monitor']);
+check('per-route monitor override detects signal but allows request', $monDecision->action === Action::Allow && count($monDecision->signals) > 0);
+
+$onlyHoneypot = $guard->inspect($ctx('/search', '198.51.100.78', null, null, 'GET', [
+    'inputs' => ['q' => "' union select 1,2,3--"]
+]), ['detectors' => ['honeypot']]);
+check('detector filter skips non-matching MaliciousPayloadDetector', $onlyHoneypot->action === Action::Allow && $onlyHoneypot->score === 0);
+
+$bypassDecision = $guard->inspect($ctx('/.env', '198.51.100.79'), ['bypass' => true]);
+check('bypass override skips all inspection', $bypassDecision->action === Action::Allow && $bypassDecision->score === 0);
+
+// 15. Multi-dimensional exclusions (paths, fields, users, roles, headers) + custom detector + monitor-only per detector
+$cfgEx = $cfg;
+$cfgEx['exclusions'] = [
+    'paths' => ['/health*'],
+    'fields' => ['raw_sql_note'],
+    'users' => ['vip-1'],
+    'roles' => ['superadmin'],
+    'headers' => ['x-probe' => 'ok'],
+];
+$cfgEx['detectors']['honeypot']['monitor_only'] = true;
+$gEx = new Guard(new ArrayStore(), [
+    new HoneypotDetector($cfgEx['detectors']['honeypot']),
+    new MaliciousPayloadDetector($cfgEx['detectors']['malicious_payload']),
+], $cfgEx);
+
+check('path exclusion bypasses /.env under /health*', $gEx->inspect($ctx('/health/check', '198.51.100.80'))->action === Action::Allow);
+check('field exclusion strips raw_sql_note from SQLi inspection', $gEx->inspect($ctx('/save', '198.51.100.81', null, null, 'POST', [
+    'inputs' => ['raw_sql_note' => "' union select username, password from users--"]
+]))->score === 0);
+check('user exclusion bypasses vip-1', $gEx->inspect($ctx('/.env', '198.51.100.82', null, 'vip-1'))->action === Action::Allow);
+check('role exclusion bypasses superadmin', $gEx->inspect($ctx('/.env', '198.51.100.83', null, '500', 'GET', ['roles' => ['superadmin']]))->action === Action::Allow);
+check('header exclusion bypasses matching header', $gEx->inspect($ctx('/.env', '198.51.100.84', null, null, 'GET', ['headers' => ['x-probe' => ['ok']]]))->action === Action::Allow);
+check('per-detector monitor_only records signal without blocking score', $gEx->inspect($ctx('/.env', '198.51.100.85'))->action === Action::Allow);
+
+$customDetector = new class implements Detector {
+    public function name(): string { return 'custom_trap'; }
+    public function inspect(RequestContext $context): array {
+        return $context->path === '/custom-trap' ? [new Signal('custom_trap', 100, 'Custom trap hit')] : [];
+    }
+    public function observe(RequestContext $context, int $status): array { return []; }
+};
+$gEx->addDetector($customDetector);
+check('pluggable addDetector blocks on custom signal', $gEx->inspect($ctx('/custom-trap', '198.51.100.86'))->action === Action::Block);
+
+// 16. Pluggable VulnerabilityStore drivers (Array & Null)
+$arrVuln = new ArrayVulnerabilityStore();
+$arrVuln->recordExposed(['type' => 'test']);
+check('ArrayVulnerabilityStore stores and retrieves incidents', count($arrVuln->getExposedIncidents()) === 1);
+$nullVuln = new NullVulnerabilityStore();
+$nullVuln->recordExposed(['type' => 'ignored']);
+check('NullVulnerabilityStore discards incidents', count($nullVuln->getExposedIncidents()) === 0);
 
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);

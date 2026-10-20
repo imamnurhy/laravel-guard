@@ -81,6 +81,53 @@ final class SyncCommand extends Command
                     $this->info('✓ Disinkronkan remote policy v' . ($data['policy']['version'] ?? '1') . ' (mode: ' . ($data['policy']['mode'] ?? 'enforce') . ').');
                 }
 
+                // 4b. Eksekusi antrean perintah ban/unban dari Control Plane (pull queue)
+                if (! empty($data['commands']) && is_array($data['commands']) && app()->bound(\AppGuard\Core\Guard::class)) {
+                    $guard = app(\AppGuard\Core\Guard::class);
+                    $banHandler = app()->bound(\AppGuard\Handlers\DefaultUserBanHandler::class)
+                        ? app(\AppGuard\Handlers\DefaultUserBanHandler::class)
+                        : null;
+                    $ackIds = [];
+                    foreach ($data['commands'] as $cmd) {
+                        if (! is_array($cmd)) {
+                            continue;
+                        }
+                        $action = (string) ($cmd['action'] ?? $cmd['event'] ?? '');
+                        $subject = (string) ($cmd['subject'] ?? $cmd['ip'] ?? $cmd['user_id'] ?? '');
+                        if ($subject === '') {
+                            continue;
+                        }
+                        if ($action === 'unban_ip' || $action === 'unblock') {
+                            $guard->unblock($subject, 'control_plane', (string) ($cmd['reason'] ?? 'Control Plane Unban'));
+                            if (! empty($cmd['id'])) {
+                                $ackIds[] = $cmd['id'];
+                            }
+                        } elseif ($action === 'unban_user') {
+                            $guard->unbanUser($subject, 'control_plane', (string) ($cmd['reason'] ?? 'Control Plane Unban'));
+                            $banHandler?->unban($subject, syncDb: (bool) ($cmd['sync_db'] ?? true));
+                            if (! empty($cmd['id'])) {
+                                $ackIds[] = $cmd['id'];
+                            }
+                        } elseif ($action === 'ban_ip' || $action === 'block') {
+                            $guard->block($subject, (int) ($cmd['ttl'] ?? 3600), (string) ($cmd['reason'] ?? 'Control Plane Ban'), 'control_plane');
+                            if (! empty($cmd['id'])) {
+                                $ackIds[] = $cmd['id'];
+                            }
+                        }
+                    }
+                    if ($ackIds !== []) {
+                        try {
+                            $client->request('POST', '/commands/ack', [
+                                'headers' => ['Content-Type' => 'application/json'],
+                                'body' => (string) json_encode(['ids' => $ackIds]),
+                            ]);
+                        } catch (\Throwable) {
+                            // Fail-open
+                        }
+                        $this->info('✓ Diterapkan ' . count($ackIds) . ' perintah ban/unban dari Control Plane.');
+                    }
+                }
+
                 // 5. Simpan Snapshot Cadangan Lokal "Last Known Good Rules & Policy"
                 $this->saveFallbackSnapshot($appKey, $data);
 

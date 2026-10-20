@@ -39,8 +39,15 @@ final class ShipTelemetryCommand extends Command
                 $batch[] = [
                     'ip_address' => $decoded['ip'] ?? $decoded['ip_address'] ?? '127.0.0.1',
                     'violation_type' => $decoded['type'] ?? $decoded['violation_type'] ?? 'unknown',
+                    'ban_type' => $decoded['ban_type'] ?? null,
+                    'subject' => $decoded['subject'] ?? $decoded['user_id'] ?? $decoded['ip'] ?? null,
+                    'user_id' => $decoded['user_id'] ?? null,
                     'score' => (int) ($decoded['score'] ?? 0),
                     'payload_sample' => is_array($decoded['payload'] ?? null) ? json_encode($decoded['payload']) : ($decoded['payload'] ?? null),
+                    'reasons' => $decoded['reasons'] ?? null,
+                    'banned_at' => $decoded['banned_at'] ?? null,
+                    'expires_at' => $decoded['expires_at'] ?? null,
+                    'lifted_by' => $decoded['lifted_by'] ?? null,
                     'user_agent' => $decoded['user_agent'] ?? null,
                     'occurred_at' => $decoded['timestamp'] ?? now()->toIso8601String(),
                 ];

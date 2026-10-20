@@ -2,6 +2,7 @@
 
 namespace AppGuard\Core;
 
+use AppGuard\Core\Contracts\BanRegistry;
 use AppGuard\Core\Contracts\Detector;
 use AppGuard\Core\Contracts\Store;
 use AppGuard\Core\Contracts\VulnerabilityStore;
@@ -23,6 +24,27 @@ final class Guard
     /** @var null|callable(mixed $user, int $score, string $reason, ?RequestContext $ctx): void */
     private $onUserForceLoggedOutCallback = null;
 
+    /** @var null|callable(BanRecord $ban): void */
+    private $onBanCallback = null;
+
+    /** @var null|callable(string $type, string $subject, string $liftedBy, string $reason, ?BanRecord $previous): void */
+    private $onBanLiftedCallback = null;
+
+    /** @var null|callable(array<string, mixed> $incident): void */
+    private $onIncidentCallback = null;
+
+    /** @var null|callable(RequestContext $ctx, Decision $decision): void */
+    private $onScoredCallback = null;
+
+    /** @var null|callable(mixed $request, Decision $decision): mixed */
+    private $respondUsingCallback = null;
+
+    /** @var null|callable(mixed $request): mixed */
+    private $userResolver = null;
+
+    /** @var null|callable(mixed $request): ?string */
+    private $tenantResolver = null;
+
     /** @param Detector[] $detectors */
     public function __construct(
         private Store $store,
@@ -30,7 +52,25 @@ final class Guard
         private array $config = [],
         private ?LoggerInterface $logger = null,
         private ?VulnerabilityStore $vulnerabilityStore = null,
+        private ?BanRegistry $banRegistry = null,
     ) {
+    }
+
+    public function banRegistry(): ?BanRegistry
+    {
+        return $this->banRegistry;
+    }
+
+    /** @return Detector[] */
+    public function detectors(): array
+    {
+        return $this->detectors;
+    }
+
+    public function addDetector(Detector $detector): self
+    {
+        $this->detectors[] = $detector;
+        return $this;
     }
 
     public function setOnUserBanned(?callable $callback): self
@@ -43,6 +83,74 @@ final class Guard
     {
         $this->onUserForceLoggedOutCallback = $callback;
         return $this;
+    }
+
+    public function onBan(?callable $callback): self
+    {
+        $this->onBanCallback = $callback;
+        return $this;
+    }
+
+    public function onBanLifted(?callable $callback): self
+    {
+        $this->onBanLiftedCallback = $callback;
+        return $this;
+    }
+
+    public function onIncident(?callable $callback): self
+    {
+        $this->onIncidentCallback = $callback;
+        return $this;
+    }
+
+    public function onScored(?callable $callback): self
+    {
+        $this->onScoredCallback = $callback;
+        return $this;
+    }
+
+    public function respondUsing(?callable $callback): self
+    {
+        $this->respondUsingCallback = $callback;
+        return $this;
+    }
+
+    public function customResponder(): ?callable
+    {
+        return $this->respondUsingCallback;
+    }
+
+    public function resolveUserUsing(?callable $resolver): self
+    {
+        $this->userResolver = $resolver;
+        return $this;
+    }
+
+    public function userResolver(): ?callable
+    {
+        return $this->userResolver;
+    }
+
+    public function resolveTenantUsing(?callable $resolver): self
+    {
+        $this->tenantResolver = $resolver;
+        return $this;
+    }
+
+    public function tenantResolver(): ?callable
+    {
+        return $this->tenantResolver;
+    }
+
+    public function currentTenant(mixed $request = null): ?string
+    {
+        if ($this->tenantResolver !== null) {
+            return ($this->tenantResolver)($request);
+        }
+
+        return isset($this->config['control_plane']['app_key']) && $this->config['control_plane']['app_key'] !== ''
+            ? (string) $this->config['control_plane']['app_key']
+            : null;
     }
 
     public function enabled(): bool
@@ -61,22 +169,71 @@ final class Guard
     }
 
     /**
-     * Memeriksa apakah IP request masuk dalam daftar allowlist (exact IP atau CIDR subnet).
+     * Memeriksa apakah request masuk dalam daftar allowlist/exclusions
+     * (IP/CIDR, path wildcard, user ID, role, atau header).
      */
     public function isAllowed(RequestContext $ctx): bool
     {
         $allowlist = $this->config['allowlist'] ?? [];
-        if (empty($allowlist) || $ctx->ip === '') {
+        if (! empty($allowlist) && $ctx->ip !== '' && IpMatcher::matches($ctx->ip, $allowlist)) {
+            return true;
+        }
+
+        $exclusions = $this->config['exclusions'] ?? [];
+        if (empty($exclusions)) {
             return false;
         }
 
-        return IpMatcher::matches($ctx->ip, $allowlist);
+        if (! empty($exclusions['ips']) && $ctx->ip !== '' && IpMatcher::matches($ctx->ip, (array) $exclusions['ips'])) {
+            return true;
+        }
+
+        if (! empty($exclusions['paths']) && PathMatcher::matches((array) $exclusions['paths'], $ctx->path) !== null) {
+            return true;
+        }
+
+        if (! empty($exclusions['users']) && $ctx->userId !== null) {
+            $excludedUsers = array_map('strval', (array) $exclusions['users']);
+            if (in_array((string) $ctx->userId, $excludedUsers, true)) {
+                return true;
+            }
+        }
+
+        if (! empty($exclusions['roles'])) {
+            $roles = (array) ($ctx->attributes['roles'] ?? []);
+            if ($roles !== [] && array_intersect($roles, (array) $exclusions['roles']) !== []) {
+                return true;
+            }
+        }
+
+        if (! empty($exclusions['headers']) && is_array($exclusions['headers'])) {
+            $reqHeaders = (array) ($ctx->attributes['headers'] ?? []);
+            foreach ($exclusions['headers'] as $name => $expected) {
+                $key = strtolower((string) $name);
+                $val = $reqHeaders[$key] ?? null;
+                $actual = is_array($val) ? ($val[0] ?? null) : $val;
+                if ($actual !== null && ($expected === '*' || (string) $actual === (string) $expected)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
-    /** Fase PRE: periksa request sebelum controller. */
-    public function inspect(RequestContext $ctx): Decision
+    /**
+     * Fase PRE: periksa request sebelum controller.
+     *
+     * @param array<string, mixed> $overrides Override per-route/controller (profile, throttle, block, mode, detectors, bypass).
+     */
+    public function inspect(RequestContext $ctx, array $overrides = []): Decision
     {
-        if ($this->isAllowed($ctx)) {
+        if (! empty($overrides['bypass']) || $this->isAllowed($ctx)) {
+            return Decision::allow();
+        }
+
+        $resolved = $this->resolveProfileOverrides($ctx->path, $overrides);
+        if (! empty($resolved['bypass'])) {
             return Decision::allow();
         }
 
@@ -107,23 +264,43 @@ final class Guard
             ));
         }
 
+        $inspectCtx = $this->stripExcludedFields($ctx);
+        $allowedDetectors = $resolved['detectors'] ?? null;
+
         $signals = [];
+        $enforcingSignals = [];
         foreach ($this->detectors as $detector) {
-            foreach ($detector->inspect($ctx) as $signal) {
+            if ($allowedDetectors !== null && ! $this->detectorMatchesFilter($detector, $allowedDetectors)) {
+                continue;
+            }
+
+            $detectorMonitorOnly = $this->isDetectorMonitorOnly($detector, $resolved);
+            foreach ($detector->inspect($inspectCtx) as $signal) {
+                if ($allowedDetectors !== null && ! $this->signalMatchesFilter($signal->detector, $allowedDetectors)) {
+                    continue;
+                }
                 $signals[] = $signal;
+                if (! $detectorMonitorOnly && ! $this->isSignalMonitorOnly($signal->detector)) {
+                    $enforcingSignals[] = $signal;
+                }
             }
         }
 
-        $score = $this->reputation($ctx) + $this->sum($signals);
-        $this->persist($ctx, $signals);
+        $score = $this->reputation($ctx) + $this->sum($enforcingSignals);
+        $this->persist($ctx, $enforcingSignals);
 
-        [$throttleAt, $blockAt] = $this->thresholds($ctx->path);
+        [$throttleAt, $blockAt] = [$resolved['throttle'], $resolved['block']];
+        $effectiveMode = $resolved['mode'] ?? ($this->config['mode'] ?? 'monitor');
 
-        $action = match (true) {
-            $score >= $blockAt => Action::Block,
-            $score >= $throttleAt => Action::Throttle,
-            default => Action::Allow,
-        };
+        if ($effectiveMode === 'monitor') {
+            $action = Action::Allow;
+        } else {
+            $action = match (true) {
+                $score >= $blockAt => Action::Block,
+                $score >= $throttleAt => Action::Throttle,
+                default => Action::Allow,
+            };
+        }
 
         // "Throttle" = dibatasi lajunya, bukan ditolak total.
         if ($action === Action::Throttle && ! $this->throttleExceeded($ctx)) {
@@ -139,8 +316,12 @@ final class Guard
 
         // Jika score mencapai batas penalti dan ada user context, evaluasi tindakan penalti (Tiered Defense)
         $banThreshold = (int) ($this->config['user_ban']['threshold'] ?? 100);
-        if ($score >= $banThreshold && $ctx->userId !== null) {
-            $this->evaluateUserPenalty($ctx, $score, implode('; ', $decision->reasons()), signals: $signals);
+        if ($effectiveMode !== 'monitor' && $score >= $banThreshold && $ctx->userId !== null) {
+            $this->evaluateUserPenalty($ctx, $score, implode('; ', $decision->reasons()), signals: $enforcingSignals);
+        }
+
+        if ($this->onScoredCallback !== null) {
+            ($this->onScoredCallback)($ctx, $decision);
         }
 
         return $this->log($ctx, $decision);
@@ -275,17 +456,79 @@ final class Guard
         if ($this->vulnerabilityStore !== null) {
             $this->vulnerabilityStore->recordExposed($incident);
         }
+        if ($this->onIncidentCallback !== null) {
+            ($this->onIncidentCallback)($incident);
+        }
     }
 
-    public function block(string $ip, int $seconds): void
+    public function block(string $ip, int $seconds, string $reason = 'Manual IP block', string $source = 'manual', int $score = 100): void
     {
         $this->store->put($this->blockKey($ip), 1, $seconds);
+
+        $now = time();
+        $record = new BanRecord(
+            type: BanRecord::TYPE_IP,
+            subject: $ip,
+            reason: $reason,
+            source: $source,
+            score: $score,
+            bannedAt: $now,
+            expiresAt: $seconds > 0 ? $now + $seconds : null,
+            ip: $ip,
+        );
+
+        if ($this->banRegistry !== null) {
+            $this->banRegistry->record($record);
+        }
+
+        if ($this->onBanCallback !== null) {
+            ($this->onBanCallback)($record);
+        }
+
+        if ($this->vulnerabilityStore !== null) {
+            $this->recordVulnerability([
+                'type' => 'ban.created',
+                'ban_type' => BanRecord::TYPE_IP,
+                'severity' => 'high',
+                'score' => $score,
+                'ip' => $ip,
+                'subject' => $ip,
+                'source' => $source,
+                'reasons' => [$reason],
+                'banned_at' => date('Y-m-d H:i:s', $now),
+                'expires_at' => $record->expiresAt ? date('Y-m-d H:i:s', $record->expiresAt) : null,
+                'timestamp' => date('Y-m-d H:i:s', $now),
+            ]);
+        }
     }
 
-    public function unblock(string $ip): void
+    public function unblock(string $ip, string $liftedBy = 'system', string $reason = 'Manual unblock'): void
     {
+        $previous = $this->banRegistry?->find(BanRecord::TYPE_IP, $ip);
+
         $this->store->forget($this->blockKey($ip));
         $this->store->forget("score:ip:{$ip}");
+
+        if ($this->banRegistry !== null) {
+            $this->banRegistry->remove(BanRecord::TYPE_IP, $ip);
+        }
+
+        if ($this->onBanLiftedCallback !== null) {
+            ($this->onBanLiftedCallback)(BanRecord::TYPE_IP, $ip, $liftedBy, $reason, $previous);
+        }
+
+        if ($this->vulnerabilityStore !== null) {
+            $this->recordVulnerability([
+                'type' => 'ban.lifted',
+                'ban_type' => BanRecord::TYPE_IP,
+                'severity' => 'info',
+                'ip' => $ip,
+                'subject' => $ip,
+                'lifted_by' => $liftedBy,
+                'reasons' => [$reason],
+                'timestamp' => date('Y-m-d H:i:s'),
+            ]);
+        }
     }
 
     public function isBlocked(string $ip): bool
@@ -303,23 +546,49 @@ final class Guard
         return $this->store->count("score:user:{$userId}");
     }
 
-    public function unbanUser(string|int $userId): void
+    public function unbanUser(string|int $userId, string $liftedBy = 'system', string $reason = 'Manual unban'): void
     {
+        $previous = $this->banRegistry?->find(BanRecord::TYPE_USER, (string) $userId);
+
         $this->store->forget("block:user:{$userId}");
         $this->store->forget("guard:user_banned:{$userId}");
         $this->store->forget("score:user:{$userId}");
         $this->store->forget("force_logout:user:{$userId}");
+
+        if ($this->banRegistry !== null) {
+            $this->banRegistry->remove(BanRecord::TYPE_USER, (string) $userId);
+        }
 
         $ruleCaps = $this->config['user_ban']['rule_score_caps'] ?? [];
         foreach (array_keys($ruleCaps) as $ruleKey) {
             $this->store->forget("score:user:{$userId}:rule:{$ruleKey}");
         }
 
-        if (class_exists(\Illuminate\Support\Facades\Cache::class)) {
-            \Illuminate\Support\Facades\Cache::forget("block:user:{$userId}");
-            \Illuminate\Support\Facades\Cache::forget("guard:user_banned:{$userId}");
-            \Illuminate\Support\Facades\Cache::forget("score:user:{$userId}");
-            \Illuminate\Support\Facades\Cache::forget("force_logout:user:{$userId}");
+        if (class_exists(\Illuminate\Support\Facades\Cache::class) && \Illuminate\Support\Facades\Cache::getFacadeRoot() !== null) {
+            try {
+                \Illuminate\Support\Facades\Cache::forget("block:user:{$userId}");
+                \Illuminate\Support\Facades\Cache::forget("guard:user_banned:{$userId}");
+                \Illuminate\Support\Facades\Cache::forget("score:user:{$userId}");
+                \Illuminate\Support\Facades\Cache::forget("force_logout:user:{$userId}");
+            } catch (\Throwable) {
+            }
+        }
+
+        if ($this->onBanLiftedCallback !== null) {
+            ($this->onBanLiftedCallback)(BanRecord::TYPE_USER, (string) $userId, $liftedBy, $reason, $previous);
+        }
+
+        if ($this->vulnerabilityStore !== null) {
+            $this->recordVulnerability([
+                'type' => 'ban.lifted',
+                'ban_type' => BanRecord::TYPE_USER,
+                'severity' => 'info',
+                'user_id' => (string) $userId,
+                'subject' => (string) $userId,
+                'lifted_by' => $liftedBy,
+                'reasons' => [$reason],
+                'timestamp' => date('Y-m-d H:i:s'),
+            ]);
         }
     }
 
@@ -347,6 +616,26 @@ final class Guard
         }
 
         return false;
+    }
+
+    /** @return array<string, BanRecord> */
+    public function bans(?string $type = null): array
+    {
+        if ($this->banRegistry === null) {
+            return [];
+        }
+
+        $all = $this->banRegistry->all();
+        if ($type !== null && $type !== '') {
+            $all = array_filter($all, fn (BanRecord $b) => $b->type === $type);
+        }
+
+        return $all;
+    }
+
+    public function findBan(string $type, string|int $subject): ?BanRecord
+    {
+        return $this->banRegistry?->find($type, (string) $subject);
     }
 
     // ------------------------------------------------------------------
@@ -413,6 +702,22 @@ final class Guard
 
         $ttl = (int) ($this->config['user_ban']['duration'] ?? 604800); // 7 hari
         $this->store->put("block:user:{$userId}", 1, $ttl);
+
+        if ($this->banRegistry !== null) {
+            $now = time();
+            $label = is_object($userObject) ? ($userObject->username ?? $userObject->email ?? null) : null;
+            $this->banRegistry->record(new BanRecord(
+                type: BanRecord::TYPE_USER,
+                subject: (string) $userId,
+                reason: $reason,
+                source: 'user_ban',
+                score: $score,
+                bannedAt: $now,
+                expiresAt: $ttl > 0 ? $now + $ttl : null,
+                ip: $ctx->ip ?: null,
+                meta: array_filter(['label' => $label, 'path' => $ctx->path]),
+            ));
+        }
 
         if ($this->onUserBannedCallback !== null) {
             ($this->onUserBannedCallback)($userObject ?? $userId, $score, $reason, $ctx);
@@ -507,16 +812,154 @@ final class Guard
     /** @return array{0:int,1:int} */
     private function thresholds(string $path): array
     {
-        $t = $this->config['thresholds'] ?? ['throttle' => 50, 'block' => 100];
+        $resolved = $this->resolveProfileOverrides($path, []);
 
-        foreach ($this->config['profiles'] ?? [] as $profile) {
-            if (PathMatcher::matches($profile['paths'] ?? [], $path) !== null) {
-                $t = array_merge($t, array_intersect_key($profile, ['throttle' => 1, 'block' => 1]));
-                break;
+        return [$resolved['throttle'], $resolved['block']];
+    }
+
+    /**
+     * Gabungkan preset/profile berdasarkan path dan override per-route/controller.
+     *
+     * @param array<string, mixed> $overrides
+     * @return array{throttle:int, block:int, mode:?string, detectors:?array, bypass:bool}
+     */
+    public function resolveProfileOverrides(string $path, array $overrides = []): array
+    {
+        $base = $this->config['thresholds'] ?? ['throttle' => 50, 'block' => 100];
+        $presets = $this->builtInPresets();
+        $profiles = array_replace_recursive($presets, $this->config['profiles'] ?? []);
+
+        $matched = [];
+        if (! empty($overrides['profile']) && isset($profiles[$overrides['profile']])) {
+            $matched = (array) $profiles[$overrides['profile']];
+        } else {
+            foreach ($this->config['profiles'] ?? [] as $profile) {
+                if (! empty($profile['paths']) && PathMatcher::matches((array) $profile['paths'], $path) !== null) {
+                    $matched = (array) $profile;
+                    break;
+                }
             }
         }
 
-        return [(int) $t['throttle'], (int) $t['block']];
+        $merged = array_merge($base, $matched, array_filter($overrides, fn ($v) => $v !== null));
+
+        return [
+            'throttle' => (int) ($merged['throttle'] ?? 50),
+            'block' => (int) ($merged['block'] ?? 100),
+            'mode' => isset($merged['mode']) ? (string) $merged['mode'] : null,
+            'detectors' => isset($merged['detectors']) && is_array($merged['detectors']) ? $merged['detectors'] : null,
+            'bypass' => ! empty($merged['bypass']),
+        ];
+    }
+
+    /** @return array<string, array<string, mixed>> */
+    private function builtInPresets(): array
+    {
+        return [
+            'strict' => ['throttle' => 30, 'block' => 70, 'mode' => 'enforce'],
+            'balanced' => ['throttle' => 50, 'block' => 100, 'mode' => 'enforce'],
+            'monitor' => ['throttle' => 50, 'block' => 100, 'mode' => 'monitor'],
+        ];
+    }
+
+    private function stripExcludedFields(RequestContext $ctx): RequestContext
+    {
+        $fields = (array) ($this->config['exclusions']['fields'] ?? []);
+        $inputs = $ctx->attributes['inputs'] ?? null;
+        if ($fields === [] || ! is_array($inputs) || $inputs === []) {
+            return $ctx;
+        }
+
+        $filtered = $this->filterFieldsRecursive($inputs, $fields);
+        $attrs = $ctx->attributes;
+        $attrs['inputs'] = $filtered;
+
+        return new RequestContext(
+            ip: $ctx->ip,
+            method: $ctx->method,
+            path: $ctx->path,
+            userAgent: $ctx->userAgent,
+            routeName: $ctx->routeName,
+            userId: $ctx->userId,
+            identifier: $ctx->identifier,
+            attributes: $attrs,
+        );
+    }
+
+    /**
+     * @param array<string|int, mixed> $inputs
+     * @param string[] $excludedPatterns
+     * @return array<string|int, mixed>
+     */
+    private function filterFieldsRecursive(array $inputs, array $excludedPatterns): array
+    {
+        $out = [];
+        foreach ($inputs as $key => $val) {
+            $matched = false;
+            foreach ($excludedPatterns as $pattern) {
+                if (fnmatch((string) $pattern, (string) $key, FNM_CASEFOLD)) {
+                    $matched = true;
+                    break;
+                }
+            }
+            if ($matched) {
+                continue;
+            }
+            $out[$key] = is_array($val) ? $this->filterFieldsRecursive($val, $excludedPatterns) : $val;
+        }
+
+        return $out;
+    }
+
+    /** @param string[] $allowed */
+    private function detectorMatchesFilter(Detector $detector, array $allowed): bool
+    {
+        $detName = strtolower($detector->name());
+        $short = strtolower((string) preg_replace('/Detector$/', '', (new \ReflectionClass($detector))->getShortName()));
+
+        foreach ($allowed as $name) {
+            $n = strtolower(trim((string) $name));
+            if ($n === $detName || $n === $short || ($n === 'waf' && in_array($detName, ['honeypot', 'path_traversal', 'malicious_payload', 'parameter_tampering', 'anomaly'], true))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** @param string[] $allowed */
+    private function signalMatchesFilter(string $signalDetector, array $allowed): bool
+    {
+        foreach ($allowed as $name) {
+            $n = strtolower(trim((string) $name));
+            if ($n === strtolower($signalDetector) || $n === 'waf') {
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    /** @param array<string, mixed> $resolved */
+    private function isDetectorMonitorOnly(Detector $detector, array $resolved): bool
+    {
+        if (($resolved['mode'] ?? null) === 'monitor') {
+            return true;
+        }
+        $detCfg = $this->config['detectors'][$detector->name()] ?? [];
+
+        return ($detCfg['mode'] ?? null) === 'monitor' || ! empty($detCfg['monitor_only']);
+    }
+
+    private function isSignalMonitorOnly(string $detectorName): bool
+    {
+        $detCfg = $this->config['detectors'][$detectorName] ?? [];
+        if (($detCfg['mode'] ?? null) === 'monitor' || ! empty($detCfg['monitor_only'])) {
+            return true;
+        }
+        $ruleCfg = $this->config['rules'][$detectorName] ?? [];
+
+        return ($ruleCfg['mode'] ?? null) === 'monitor' || ! empty($ruleCfg['monitor_only']);
     }
 
     private function throttleExceeded(RequestContext $ctx): bool

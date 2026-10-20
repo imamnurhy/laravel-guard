@@ -2,6 +2,7 @@
 
 namespace AppGuard;
 
+use AppGuard\Core\Contracts\BanRegistry;
 use AppGuard\Core\Contracts\Store;
 use AppGuard\Core\Contracts\VulnerabilityStore;
 use AppGuard\Core\Detectors\AnomalyDetector;
@@ -12,20 +13,32 @@ use AppGuard\Core\Detectors\MaliciousPayloadDetector;
 use AppGuard\Core\Detectors\ParameterTamperingDetector;
 use AppGuard\Core\Detectors\PathTraversalDetector;
 use AppGuard\Core\Guard;
+use AppGuard\Console\BanCommand;
 use AppGuard\Console\BlockCommand;
+use AppGuard\Console\DoctorCommand;
 use AppGuard\Console\HeartbeatCommand;
 use AppGuard\Console\InstallCommand;
 use AppGuard\Console\ShipTelemetryCommand;
 use AppGuard\Console\StatusCommand;
 use AppGuard\Console\SyncCommand;
+use AppGuard\Console\TestRuleCommand;
 use AppGuard\Console\UnblockCommand;
 use AppGuard\Console\UnbanUserCommand;
 use AppGuard\Console\UserStatusCommand;
 use AppGuard\Console\BanUserCommand;
 use AppGuard\Core\ControlPlaneClient;
+use AppGuard\Core\Stores\ArrayBanRegistry;
+use AppGuard\Core\Stores\ArrayStore;
+use AppGuard\Core\Stores\ArrayVulnerabilityStore;
+use AppGuard\Core\Stores\NullVulnerabilityStore;
+use AppGuard\Events\BanLifted;
+use AppGuard\Events\IncidentRecorded;
+use AppGuard\Events\IpBlocked;
+use AppGuard\Events\RequestScored;
 use AppGuard\Handlers\DefaultUserBanHandler;
 use AppGuard\Http\GuardMiddleware;
 use AppGuard\Listeners\AuthEventListener;
+use AppGuard\Stores\CacheBanRegistry;
 use AppGuard\Stores\CacheStore;
 use AppGuard\Stores\JsonFileVulnerabilityStore;
 use Illuminate\Auth\Events\Failed;
@@ -38,16 +51,41 @@ class GuardServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/guard.php', 'guard');
 
-        $this->app->singleton(Store::class, fn ($app) => new CacheStore(
-            $app['cache']->store($app['config']->get('guard.store')),
-        ));
+        $this->app->singleton(Store::class, function ($app) {
+            $storeName = $app['config']->get('guard.store');
+            $prefix = $this->resolveKeyPrefix($app['config']->get('guard', []));
+            if ($storeName === 'array') {
+                return new ArrayStore();
+            }
 
-        $this->app->singleton(VulnerabilityStore::class, fn ($app) => new JsonFileVulnerabilityStore(
-            $app['config']->get('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'))
-        ));
+            return new CacheStore($app['cache']->store($storeName), $prefix);
+        });
+
+        $this->app->singleton(BanRegistry::class, function ($app) {
+            $storeName = $app['config']->get('guard.store');
+            $prefix = $this->resolveKeyPrefix($app['config']->get('guard', []));
+            if ($storeName === 'array') {
+                return new ArrayBanRegistry();
+            }
+
+            return new CacheBanRegistry($app['cache']->store($storeName), "{$prefix}bans:index");
+        });
+
+        $this->app->singleton(VulnerabilityStore::class, function ($app) {
+            $driver = $app['config']->get('guard.vulnerability.driver', 'jsonl');
+
+            return match ($driver) {
+                'null', 'none', false => new NullVulnerabilityStore(),
+                'array', 'memory' => new ArrayVulnerabilityStore(),
+                default => new JsonFileVulnerabilityStore(
+                    $app['config']->get('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'))
+                ),
+            };
+        });
 
         $this->app->singleton(DefaultUserBanHandler::class, fn ($app) => new DefaultUserBanHandler(
-            $app->make(VulnerabilityStore::class)
+            $app->make(VulnerabilityStore::class),
+            $app->make(BanRegistry::class),
         ));
 
         $this->app->singleton(BruteForceDetector::class, fn ($app) => new BruteForceDetector(
@@ -158,10 +196,11 @@ class GuardServiceProvider extends ServiceProvider
                 $detectors,
                 $cfg,
                 $app['log']->channel($cfg['log_channel'] ?? null),
-                $vulnStore
+                $vulnStore,
+                $app->make(BanRegistry::class),
             );
 
-            // Hook callback user banned & force logout ke BanHandler
+            // Hook callback user banned, force logout, dan Laravel Events
             $banHandler = $app->make(DefaultUserBanHandler::class);
             $guard->setOnUserBanned(function ($user, $score, $reason, $ctx) use ($banHandler) {
                 $banHandler->ban($user, $score, $reason, $ctx);
@@ -169,11 +208,45 @@ class GuardServiceProvider extends ServiceProvider
             $guard->setOnUserForceLoggedOut(function ($user, $score, $reason, $ctx) use ($banHandler) {
                 $banHandler->handleForceLogout($user, $score, $reason, $ctx);
             });
+            $guard->onBan(function ($ban) use ($guard) {
+                if ($ban->type === \AppGuard\Core\BanRecord::TYPE_IP) {
+                    event(new IpBlocked(
+                        ip: $ban->subject,
+                        seconds: $ban->remaining() ?? 0,
+                        reason: $ban->reason,
+                        source: $ban->source,
+                        score: $ban->score,
+                        record: $ban,
+                        tenant: $guard->currentTenant(),
+                    ));
+                }
+            });
+            $guard->onBanLifted(function ($type, $subject, $liftedBy, $reason, $previous) use ($guard) {
+                event(new BanLifted($type, $subject, $liftedBy, $reason, $previous, $guard->currentTenant()));
+            });
+            $guard->onIncident(function (array $incident) {
+                event(new IncidentRecorded($incident));
+            });
+            $guard->onScored(function ($ctx, $decision) {
+                if ($decision->signals !== [] || ! $decision->isAllowed()) {
+                    event(new RequestScored($ctx, $decision));
+                }
+            });
 
             return $guard;
         });
 
         $this->app->singleton(GuardMiddleware::class);
+    }
+
+    private function resolveKeyPrefix(array $cfg): string
+    {
+        $base = rtrim((string) ($cfg['key_prefix'] ?? 'guard'), ':');
+        $tenant = (string) ($cfg['tenant_id'] ?? $cfg['control_plane']['app_key'] ?? '');
+
+        return $tenant !== '' && ! empty($cfg['prefix_by_tenant'])
+            ? "{$base}:{$tenant}:"
+            : "{$base}:";
     }
 
     public function boot(): void
@@ -213,9 +286,12 @@ class GuardServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallCommand::class,
+                BanCommand::class,
                 BlockCommand::class,
                 UnblockCommand::class,
                 StatusCommand::class,
+                DoctorCommand::class,
+                TestRuleCommand::class,
                 SyncCommand::class,
                 ShipTelemetryCommand::class,
                 HeartbeatCommand::class,
