@@ -18,6 +18,9 @@ Dokumen ini mencatat seluruh riwayat rilis, perubahan fitur, perbaikan bug, dan 
 - **Testing**: Penambahan test case unban dan inspeksi status pengguna di [smoke.php](./tests/smoke.php) (32 tests passed).
 
 ### Fixed
+- **CLI & Storage Directory Check** ([ShipTelemetryCommand.php](./src/Console/ShipTelemetryCommand.php), [JsonFileVulnerabilityStore.php](./src/Stores/JsonFileVulnerabilityStore.php)):
+  - Menambahkan pengecekan eksplisit `!is_dir($filePath)` / `!File::isDirectory(...)` sebelum fungsi `file()` dipanggil.
+  - Mengatasi `ErrorException: file(): Read of 8192 bytes failed with errno=21 Is a directory` yang terjadi di production jika target path masih berupa direktori atau file reguler belum terbentuk.
 - **CLI Robustness**: Parameter `{ip?}` dibuat opsional pada command `guard:status` ([StatusCommand.php](./src/Console/StatusCommand.php)):
   - Mencegah insiden `RuntimeException: Not enough arguments (missing: "ip")` saat command dijalankan tanpa argumen oleh scheduler, healthcheck, atau sysadmin.
   - Menampilkan ringkasan status operasional global sistem AppGuard saat parameter `{ip}` tidak disertakan.

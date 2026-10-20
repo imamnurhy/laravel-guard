@@ -15,8 +15,8 @@ final class ShipTelemetryCommand extends Command
         $rawPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard'));
         $filePath = \AppGuard\Stores\JsonFileVulnerabilityStore::resolveFilePath($rawPath);
 
-        if (! file_exists($filePath) || filesize($filePath) === 0) {
-            $this->info('Buffer insiden kosong. Tidak ada data yang dikirim.');
+        if (! file_exists($filePath) || is_dir($filePath) || filesize($filePath) === 0) {
+            $this->info('Buffer insiden kosong atau berkas belum terbentuk. Tidak ada data yang dikirim.');
             return self::SUCCESS;
         }
 

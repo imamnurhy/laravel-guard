@@ -67,5 +67,5 @@
 ---
 
 ## 🐛 Bug & Issue
+- [x] **ShipTelemetryCommand & JsonFileVulnerabilityStore Directory Check**: Cegah `ErrorException: file(): Read of 8192 bytes failed with errno=21 Is a directory` saat target berkas buffer atau storage path masih berupa direktori atau belum berbentuk file reguler.
 
-> Tidak ada bug atau issue aktif saat ini.
