@@ -187,9 +187,10 @@
             </div>
 
             <div class="footer">
-                Sistem Keamanan Aplikasi &bull; AppGuard
+                Sistem Keamanan &bull; {{ config('app.name', 'Portal Aplikasi') }}
             </div>
         </div>
     </div>
 </body>
 </html>
+
