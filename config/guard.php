@@ -70,7 +70,6 @@ return [
         'roles'   => [], // ['superadmin']
     ],
 
-
     /*
     |--------------------------------------------------------------------------
     | 4. Ambang Batas Skor & Profil Penalti (Thresholds & Profiles)
