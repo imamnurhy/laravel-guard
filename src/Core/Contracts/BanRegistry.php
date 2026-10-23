@@ -18,5 +18,11 @@ interface BanRegistry
 
     /** @return array<string, BanRecord> Record yang belum kedaluwarsa, di-key "type:subject". */
     public function all(): array;
-}
 
+    /**
+     * Bersihkan seluruh record ban aktif (atau khusus tipe tertentu: 'ip' / 'user').
+     *
+     * @return int Jumlah record yang dihapus dari indeks
+     */
+    public function clear(?string $type = null): int;
+}

@@ -35,6 +35,11 @@ php artisan guard:ban stats
 php artisan guard:ban unban 192.168.1.10
 php artisan guard:ban unban 42 --type=user --sync-db
 
+# Membersihkan seluruh daftar ban aktif sekaligus (IP & User, atau filter --type):
+php artisan guard:ban clear --force
+php artisan guard:ban clear --type=ip --force
+php artisan guard:ban clear --type=user --sync-db --force
+
 # Rekonsiliasi sinkronisasi ban antara Redis lokal dan Control Plane:
 php artisan guard:ban sync
 ```
@@ -114,7 +119,7 @@ php artisan guard:unban-user 105 --sync-db
 php artisan guard:sync
 php artisan guard:sync --force
 
-# Pengiriman rekaman telemetri buffer (vulnerabilities.jsonl) ke server pusat
+# Pengiriman rekaman telemetri buffer (jsonl, redis, atau cache) ke server pusat
 php artisan guard:ship-telemetry --batch-size=100
 
 # Pengiriman status heartbeat kesehatan sensor

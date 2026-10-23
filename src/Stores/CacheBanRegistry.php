@@ -71,6 +71,30 @@ final class CacheBanRegistry implements BanRegistry
         return $out;
     }
 
+    public function clear(?string $type = null): int
+    {
+        $removed = 0;
+        $this->mutate(function (array $index) use ($type, &$removed) {
+            if ($type === null || $type === '') {
+                $removed = count($index);
+
+                return [];
+            }
+
+            foreach ($index as $key => $row) {
+                $rowType = is_array($row) ? ($row['type'] ?? null) : null;
+                if ($rowType === $type || str_starts_with((string) $key, "{$type}:")) {
+                    unset($index[$key]);
+                    $removed++;
+                }
+            }
+
+            return $index;
+        });
+
+        return $removed;
+    }
+
     private function mutate(callable $callback): void
     {
         $write = function () use ($callback) {

@@ -182,17 +182,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | 6. Penyimpanan Dataset Forensik (Vulnerability Telemetry)
+    | 6. Penyimpanan Buffer Telemetri & Dataset Forensik (Telemetry & Incident Store)
     |--------------------------------------------------------------------------
-    | Menyimpan bukti percobaan serangan yang tervalidasi ke dalam berkas JSONL
-    | untuk kebutuhan audit keamanan internal dan pelatihan model Machine Learning.
-    | Anda cukup menentukan direktori penyimpanannya saja (nama 'vulnerabilities.jsonl'
-    | akan otomatis ditambahkan), atau dapat menyertakan nama berkas secara penuh.
+    | Menyimpan bukti percobaan serangan dan insiden keamanan ke dalam buffer
+    | sebelum dikirim ke Control Plane (guard:ship-telemetry) atau digunakan
+    | untuk audit keamanan internal & pelatihan model Machine Learning.
+    |
+    | Pilihan driver (cukup ubah satu env GUARD_TELEMETRY_DRIVER):
+    | - 'jsonl' : Berkas lokal vulnerabilities.jsonl (default)
+    | - 'redis' : Struktur data Redis List (RPUSH/LRANGE/LTRIM)
+    | - 'cache' : Mengikuti driver cache Laravel/Guard (guard.store)
+    | - 'array' : In-memory (khusus unit testing)
+    | - 'null'  : Nonaktifkan perekaman buffer telemetri
     */
     'vulnerability' => [
-        // Driver penyimpanan insiden: 'jsonl' (file), 'array' (in-memory test), atau 'null' (nonaktif)
-        'driver'       => env('GUARD_VULNERABILITY_DRIVER', 'jsonl'),
+        'driver'       => env('GUARD_TELEMETRY_DRIVER', env('GUARD_VULNERABILITY_DRIVER', 'jsonl')),
         'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard')),
+        'key'          => env('GUARD_TELEMETRY_KEY', 'telemetry:incidents'),
+        'connection'   => env('GUARD_REDIS_CONNECTION', 'default'),
+        'max_items'    => (int) env('GUARD_TELEMETRY_MAX_ITEMS', 5000),
+        'ttl'          => (int) env('GUARD_TELEMETRY_TTL', 604800),
     ],
 
     /*

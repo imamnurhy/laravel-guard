@@ -61,6 +61,11 @@ final class Guard
         return $this->banRegistry;
     }
 
+    public function vulnerabilityStore(): ?VulnerabilityStore
+    {
+        return $this->vulnerabilityStore;
+    }
+
     /** @return Detector[] */
     public function detectors(): array
     {
@@ -655,6 +660,37 @@ final class Guard
     public function findBan(string $type, string|int $subject): ?BanRecord
     {
         return $this->banRegistry?->find($type, (string) $subject);
+    }
+
+    /**
+     * Bersihkan seluruh daftar ban aktif (IP dan/atau User) sekaligus,
+     * mereset skor reputasi, memicu event BanLifted, dan mengosongkan indeks BanRegistry.
+     *
+     * @return int Jumlah ban yang berhasil dibersihkan
+     */
+    public function clearBans(?string $type = null, string $liftedBy = 'system', string $reason = 'Bulk clear'): int
+    {
+        $targets = $this->bans($type);
+        $cleared = 0;
+
+        foreach ($targets as $ban) {
+            if ($ban->type === BanRecord::TYPE_IP) {
+                $this->unblock($ban->subject, $liftedBy, $reason);
+                $cleared++;
+            } elseif ($ban->type === BanRecord::TYPE_USER) {
+                $this->unbanUser($ban->subject, $liftedBy, $reason);
+                $cleared++;
+            }
+        }
+
+        if ($this->banRegistry !== null) {
+            $extra = $this->banRegistry->clear($type);
+            if ($cleared === 0 && $extra > 0) {
+                $cleared = $extra;
+            }
+        }
+
+        return $cleared;
     }
 
     // ------------------------------------------------------------------

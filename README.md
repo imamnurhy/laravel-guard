@@ -20,6 +20,7 @@ php artisan vendor:publish --tag=guard-config
 ```env
 GUARD_MODE=enforce
 GUARD_CACHE_STORE=redis
+GUARD_TELEMETRY_DRIVER=redis
 GUARD_USER_BAN_ENABLED=true
 GUARD_USER_MODEL=App\Models\User
 GUARD_TEBOT_ENABLED=true
@@ -70,6 +71,7 @@ php artisan guard:ban show 203.0.113.50     # Detail mendalam status & reputasi 
 php artisan guard:ban check 203.0.113.50    # Cek cepat (exit code non-zero jika terblokir - cocok untuk CI/Script)
 php artisan guard:ban stats                 # Statistik agregat ban aktif & grafik mini proporsi detektor
 php artisan guard:ban unban 203.0.113.50    # Buka blokir (interaktif jika subject dikosongkan)
+php artisan guard:ban clear --force         # Bersihkan seluruh daftar ban aktif (IP & User) sekaligus
 php artisan guard:ban sync                  # Rekonsiliasi indeks ban lokal Redis ↔ Control Plane
 
 # === Diagnostik & Dry-Run Pengujian ===
@@ -88,7 +90,7 @@ php artisan guard:unban-user {userId} --sync-db # Buka blokir user di cache & pu
 
 # === Sinkronisasi & Integrasi Control Plane ===
 php artisan guard:sync                      # Tarik aturan dinamis, honeypots baru, & remote policy
-php artisan guard:ship-telemetry            # Kirim batch rekaman insiden (vulnerabilities.jsonl) ke Control Plane
+php artisan guard:ship-telemetry            # Kirim batch rekaman insiden (jsonl/redis/cache) ke Control Plane
 php artisan guard:heartbeat                 # Kirim sinyal heartbeat status kesehatan sensor ke Control Plane
 ```
 

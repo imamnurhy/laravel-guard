@@ -6,7 +6,11 @@ spl_autoload_register(function ($c) {
     if (str_starts_with($c, 'AppGuard\\')) {
         require __DIR__ . '/../src/' . str_replace('\\', '/', substr($c, 9)) . '.php';
     }
-});
+}, true, true);
+
+if (! class_exists(\Illuminate\Console\Command::class)) {
+    eval('namespace Illuminate\Console; class Command {}');
+}
 
 function env($k, $d = null) { return $d; }
 function storage_path($p = '') { return sys_get_temp_dir() . '/' . $p; }
@@ -25,12 +29,23 @@ use AppGuard\Core\Detectors\{
 };
 use AppGuard\Core\Stores\{ArrayBanRegistry, ArrayStore, ArrayVulnerabilityStore, NullVulnerabilityStore};
 use AppGuard\Core\Contracts\VulnerabilityStore;
+use AppGuard\Stores\{CacheVulnerabilityStore, JsonFileVulnerabilityStore, RedisVulnerabilityStore};
+use AppGuard\Console\ShipTelemetryCommand;
 
 class MockVulnerabilityStore implements VulnerabilityStore
 {
     public array $recorded = [];
     public function recordExposed(array $incident): void { $this->recorded[] = $incident; }
-    public function getExposedIncidents(int $limit = 100): array { return $this->recorded; }
+    public function getExposedIncidents(int $limit = 100): array { return array_reverse(array_slice($this->recorded, -$limit)); }
+    public function peekBatch(int $limit = 100): array { return array_values(array_slice($this->recorded, 0, $limit)); }
+    public function acknowledgeBatch(int $count): void { $this->recorded = array_values(array_slice($this->recorded, $count)); }
+    public function pullBatch(int $limit = 100): array {
+        $b = $this->peekBatch($limit);
+        $this->acknowledgeBatch(count($b));
+        return $b;
+    }
+    public function count(): int { return count($this->recorded); }
+    public function clear(): void { $this->recorded = []; }
 }
 
 $cfg = require __DIR__ . '/../config/guard.php';
@@ -264,6 +279,91 @@ $guard->unblock($testIp);
 check('IP score is reset to 0 after unblock', $guard->scoreOf($testIp) === 0);
 check('IP is no longer blocked after unblock', ! $guard->isBlocked($testIp));
 check('IP removed from BanRegistry after unblock', $guard->findBan(BanRecord::TYPE_IP, $testIp) === null);
+
+// 18. Multi-driver Telemetry Store (JsonFile, Redis, Cache, Array) + ShipTelemetry batch queue
+$tmpJsonlPath = sys_get_temp_dir() . '/guard_test_' . uniqid() . '.jsonl';
+$jsonStore = new JsonFileVulnerabilityStore($tmpJsonlPath, maxItems: 3);
+$jsonStore->recordExposed(['type' => 'sqli', 'ip' => '10.0.0.1', 'score' => 100]);
+$jsonStore->recordExposed(['type' => 'xss', 'ip' => '10.0.0.2', 'score' => 50]);
+$jsonStore->recordExposed(['type' => 'idor', 'ip' => '10.0.0.3', 'score' => 25]);
+$jsonStore->recordExposed(['type' => 'honeypot', 'ip' => '10.0.0.4', 'score' => 100]);
+check('JsonFileVulnerabilityStore enforces maxItems cap (3 items)', $jsonStore->count() === 3);
+$peekJson = $jsonStore->peekBatch(2);
+check('JsonFileVulnerabilityStore peekBatch returns oldest FIFO items without removing', count($peekJson) === 2 && $peekJson[0]['ip'] === '10.0.0.2' && $jsonStore->count() === 3);
+$jsonStore->acknowledgeBatch(2);
+check('JsonFileVulnerabilityStore acknowledgeBatch removes shipped items', $jsonStore->count() === 1 && $jsonStore->peekBatch(5)[0]['ip'] === '10.0.0.4');
+$jsonStore->clear();
+check('JsonFileVulnerabilityStore clear empties file buffer', $jsonStore->count() === 0);
+@unlink($tmpJsonlPath);
+
+// Mock Redis connection (RPUSH, LRANGE, LTRIM, LLEN, DEL)
+$fakeRedis = new class {
+    public array $lists = [];
+    public function rpush(string $k, string $v): int { $this->lists[$k][] = $v; return count($this->lists[$k]); }
+    public function lrange(string $k, int $start, int $stop): array {
+        $list = $this->lists[$k] ?? [];
+        $len = count($list);
+        if ($len === 0) return [];
+        $s = $start < 0 ? max(0, $len + $start) : $start;
+        $e = $stop < 0 ? $len + $stop : min($len - 1, $stop);
+        if ($s > $e || $s >= $len) return [];
+        return array_slice($list, $s, $e - $s + 1);
+    }
+    public function ltrim(string $k, int $start, int $stop): void {
+        $this->lists[$k] = $this->lrange($k, $start, $stop);
+    }
+    public function llen(string $k): int { return count($this->lists[$k] ?? []); }
+    public function del(string $k): void { unset($this->lists[$k]); }
+};
+$redisStore = new RedisVulnerabilityStore($fakeRedis, 'guard:telemetry:test', maxItems: 3);
+$redisStore->recordExposed(['type' => 'sqli', 'ip' => '192.0.2.1', 'score' => 100]);
+$redisStore->recordExposed(['type' => 'xss', 'ip' => '192.0.2.2', 'score' => 50]);
+$redisStore->recordExposed(['type' => 'idor', 'ip' => '192.0.2.3', 'score' => 25]);
+$redisStore->recordExposed(['type' => 'fuzz', 'ip' => '192.0.2.4', 'score' => 50]);
+check('RedisVulnerabilityStore enforces maxItems via LTRIM', $redisStore->count() === 3);
+check('RedisVulnerabilityStore getExposedIncidents returns newest first', $redisStore->getExposedIncidents(1)[0]['ip'] === '192.0.2.4');
+$redisPeek = $redisStore->peekBatch(2);
+$formattedBatch = ShipTelemetryCommand::formatBatch($redisPeek);
+check('ShipTelemetryCommand::formatBatch formats Redis telemetry batch accurately', count($formattedBatch) === 2 && $formattedBatch[0]['ip_address'] === '192.0.2.2' && $formattedBatch[0]['violation_type'] === 'xss');
+$redisStore->acknowledgeBatch(2);
+check('RedisVulnerabilityStore acknowledgeBatch trims shipped records', $redisStore->count() === 1 && $redisStore->peekBatch(1)[0]['ip'] === '192.0.2.4');
+$pulledRedis = $redisStore->pullBatch(5);
+check('RedisVulnerabilityStore pullBatch fetches and empties remaining queue', count($pulledRedis) === 1 && $redisStore->count() === 0);
+
+// Mock Cache Repository (get, put, forget)
+$fakeCache = new class {
+    public array $data = [];
+    public function get(string $k, mixed $default = null): mixed { return $this->data[$k] ?? $default; }
+    public function put(string $k, mixed $v, int $ttl = 0): bool { $this->data[$k] = $v; return true; }
+    public function forget(string $k): bool { unset($this->data[$k]); return true; }
+};
+$cacheVulnStore = new CacheVulnerabilityStore($fakeCache, 'guard:telemetry:cache', maxItems: 2, ttl: 3600);
+$cacheVulnStore->recordExposed(['type' => 'honeypot', 'ip' => '198.51.100.1', 'score' => 100]);
+$cacheVulnStore->recordExposed(['type' => 'sqli', 'ip' => '198.51.100.2', 'score' => 100]);
+$cacheVulnStore->recordExposed(['type' => 'xss', 'ip' => '198.51.100.3', 'score' => 50]);
+check('CacheVulnerabilityStore enforces maxItems cap (2 items)', $cacheVulnStore->count() === 2);
+$cachePulled = $cacheVulnStore->pullBatch(1);
+check('CacheVulnerabilityStore pullBatch pops oldest item and retains remainder', count($cachePulled) === 1 && $cachePulled[0]['ip'] === '198.51.100.2' && $cacheVulnStore->count() === 1);
+$cacheVulnStore->clear();
+check('CacheVulnerabilityStore clear removes key from cache', $cacheVulnStore->count() === 0);
+
+// 19. Bulk Clear / Flush All Bans (Guard::clearBans & BanRegistry::clear)
+$guard->clearBans(null, 'cli_test', 'Reset previous test bans');
+check('clearBans resets all prior test bans to 0', count($guard->bans()) === 0);
+
+$guard->block('203.0.113.101', 600, 'Bulk test IP 1');
+$guard->block('203.0.113.102', 600, 'Bulk test IP 2');
+$guard->recordViolation((object)['id' => 555, 'username' => 'bulk_user'], 'sqli', 100, 'Bulk test user SQLi');
+check('3 active bans (2 IP + 1 User) registered before clearBans', count($guard->bans()) === 3);
+
+$ipClearedCount = $guard->clearBans(BanRecord::TYPE_IP, 'cli_test', 'Clear IP only');
+check('clearBans(TYPE_IP) clears 2 IP bans and leaves 1 user ban', $ipClearedCount === 2 && count($guard->bans()) === 1 && $guard->isUserBanned(555));
+check('cleared IPs are no longer blocked', ! $guard->isBlocked('203.0.113.101') && ! $guard->isBlocked('203.0.113.102'));
+
+$guard->block('203.0.113.103', 600, 'Bulk test IP 3');
+$allClearedCount = $guard->clearBans(null, 'cli_test', 'Clear all bans');
+check('clearBans(null) clears all remaining IP and user bans', $allClearedCount === 2 && count($guard->bans()) === 0);
+check('user 555 is unbanned and score reset after clearBans', ! $guard->isUserBanned(555) && $guard->scoreOfUser(555) === 0);
 
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);

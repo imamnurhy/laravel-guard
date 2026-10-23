@@ -19,9 +19,15 @@ Ketika request diproses, ada dua sumber deteksi insiden dalam sistem:
 
 ---
 
-## 🗄️ 2. Struktur Penyimpanan Dataset (`vulnerabilities.jsonl`)
+## 🗄️ 2. Pilihan Driver & Struktur Penyimpanan (`jsonl`, `redis`, `cache`)
 
-File dataset disimpan secara default pada:
+Anda dapat menentukan lokasi penyimpanan buffer telemetri insiden cukup melalui satu variabel environment `GUARD_TELEMETRY_DRIVER`:
+- `jsonl` *(default)*: Disimpan ke berkas `storage/app/guard/vulnerabilities.jsonl` (`JsonFileVulnerabilityStore`).
+- `redis`: Disimpan ke dalam Redis List secara atomik menggunakan `RPUSH`/`LRANGE`/`LTRIM` (`RedisVulnerabilityStore`).
+- `cache`: Disimpan ke dalam Cache Repository sesuai driver cache Guard (`CacheVulnerabilityStore`).
+- `null`: Menonaktifkan perekaman buffer telemetri.
+
+Saat menggunakan driver `jsonl`, file dataset disimpan secara default pada:
 ```
 storage/app/guard/vulnerabilities.jsonl
 ```

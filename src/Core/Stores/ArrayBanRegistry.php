@@ -33,5 +33,25 @@ final class ArrayBanRegistry implements BanRegistry
 
         return $this->items;
     }
-}
 
+    public function clear(?string $type = null): int
+    {
+        $active = $this->all();
+        if ($type === null || $type === '') {
+            $removed = count($active);
+            $this->items = [];
+
+            return $removed;
+        }
+
+        $removed = 0;
+        foreach ($active as $id => $ban) {
+            if ($ban->type === $type) {
+                unset($this->items[$id]);
+                $removed++;
+            }
+        }
+
+        return $removed;
+    }
+}

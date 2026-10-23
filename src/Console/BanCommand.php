@@ -18,24 +18,26 @@ use Symfony\Component\Console\Helper\TableStyle;
  *   php artisan guard:ban show {subject}
  *   php artisan guard:ban check {subject}
  *   php artisan guard:ban stats [--json]
- *   php artisan guard:ban unban {subject?} [--type=] [--sync-db] [--force]
+ *   php artisan guard:ban unban {subject?} [--type=] [--all] [--sync-db] [--force]
+ *   php artisan guard:ban clear [--type=] [--sync-db] [--force] [--json]
  *   php artisan guard:ban sync [--json]
  */
 final class BanCommand extends Command
 {
     protected $signature = 'guard:ban
-        {action=list : Aksi: list | show | check | stats | unban | sync}
+        {action=list : Aksi: list | show | check | stats | unban | clear | sync}
         {subject? : IP address atau ID pengguna (untuk show/check/unban)}
         {--type= : Filter tipe subject (ip atau user)}
         {--source= : Filter sumber/detektor pemicu}
         {--search= : Cari pada subject, alasan, atau IP}
         {--sort=newest : Urutan: newest | expiring | score}
         {--limit=50 : Batas jumlah baris yang ditampilkan}
-        {--sync-db : Saat unban user, pulihkan juga status akun di database}
-        {--force : Jalankan unban tanpa konfirmasi interaktif}
+        {--all : Buka seluruh blokir aktif sekaligus (untuk unban)}
+        {--sync-db : Saat unban/clear user, pulihkan juga status akun di database}
+        {--force : Jalankan unban/clear tanpa konfirmasi interaktif}
         {--json : Tampilkan output dalam format JSON}';
 
-    protected $description = 'Monitoring dan manajemen daftar IP & pengguna yang diban/diblokir AppGuard (list, show, check, stats, unban, sync)';
+    protected $description = 'Monitoring dan manajemen daftar IP & pengguna yang diban/diblokir AppGuard (list, show, check, stats, unban, clear, sync)';
 
     public function handle(Guard $guard, DefaultUserBanHandler $banHandler): int
     {
@@ -43,7 +45,7 @@ final class BanCommand extends Command
         $subject = $this->argument('subject');
 
         // Jika pengguna memanggil `php artisan guard:ban 10.0.0.1`, perlakukan sebagai `check`
-        if (! in_array($action, ['list', 'ls', 'show', 'info', 'check', 'stats', 'unban', 'unblock', 'sync'], true) && $subject === null) {
+        if (! in_array($action, ['list', 'ls', 'show', 'info', 'check', 'stats', 'unban', 'unblock', 'clear', 'flush', 'sync'], true) && $subject === null) {
             $subject = $action;
             $action = 'check';
         }
@@ -53,7 +55,10 @@ final class BanCommand extends Command
             'show', 'info' => $this->handleShow($guard, (string) $subject),
             'check' => $this->handleCheck($guard, (string) $subject),
             'stats' => $this->handleStats($guard),
-            'unban', 'unblock' => $this->handleUnban($guard, $banHandler, $subject ? (string) $subject : null),
+            'unban', 'unblock' => $this->option('all')
+                ? $this->handleClear($guard, $banHandler)
+                : $this->handleUnban($guard, $banHandler, $subject ? (string) $subject : null),
+            'clear', 'flush' => $this->handleClear($guard, $banHandler),
             'sync' => $this->handleSync($guard, $banHandler),
             default => $this->unknownAction($action),
         };
@@ -108,7 +113,15 @@ final class BanCommand extends Command
         $this->renderBanner($guard, count($records));
 
         if ($rows === []) {
-            $this->line('  <fg=green>✓</> Tidak ada IP atau pengguna yang sedang diban/diblokir' . ($total !== count($records) ? ' (sesuai filter).' : '.'));
+            $emptyReason = $total !== count($records)
+                ? 'Tidak ada entri yang cocok dengan filter pencarian'
+                : 'Semua IP & akun pengguna berstatus aman';
+
+            $this->table(
+                ['#', 'Tipe', 'Subject', 'Skor', 'Sumber', 'Alasan', 'Waktu Ban', 'Sisa TTL'],
+                [['-', '-', '<fg=green>✓ Tidak ada ban aktif</>', '0', '-', $emptyReason, '-', '-']],
+                $this->boxTableStyle(),
+            );
             $this->newLine();
 
             return self::SUCCESS;
@@ -341,9 +354,99 @@ final class BanCommand extends Command
         return self::SUCCESS;
     }
 
+    private function handleClear(Guard $guard, DefaultUserBanHandler $banHandler): int
+    {
+        $type = $this->normalizeType($this->option('type'));
+        $syncDb = (bool) $this->option('sync-db');
+        $records = $this->collectActiveBans($guard);
+
+        if ($type !== null) {
+            $records = array_filter($records, fn (BanRecord $b) => $b->type === $type);
+        }
+
+        $total = count($records);
+
+        if ($total === 0) {
+            if ($this->option('json')) {
+                $this->line((string) json_encode([
+                    'cleared' => 0,
+                    'ip_cleared' => 0,
+                    'user_cleared' => 0,
+                    'type_filter' => $type,
+                ]));
+
+                return self::SUCCESS;
+            }
+
+            $this->renderBanner($guard, 0);
+            $this->table(
+                ['Metrik', 'Status'],
+                [['Daftar Ban Aktif', '<fg=green>✓ Kosong (tidak ada ban yang perlu dibersihkan)</>']],
+                $this->boxTableStyle(),
+            );
+            $this->newLine();
+
+            return self::SUCCESS;
+        }
+
+        if (! $this->option('force') && ! $this->option('json') && $this->input->isInteractive()) {
+            $labelType = $type ? " bertipe '" . strtoupper($type) . "'" : '';
+            if (! $this->confirm("Bersihkan seluruh {$total} ban aktif{$labelType}?", false)) {
+                $this->line('Dibatalkan.');
+
+                return self::SUCCESS;
+            }
+        }
+
+        $ipCleared = 0;
+        $userCleared = 0;
+
+        foreach ($records as $ban) {
+            if ($ban->type === BanRecord::TYPE_IP) {
+                $ipCleared++;
+            } elseif ($ban->type === BanRecord::TYPE_USER) {
+                $userCleared++;
+                if ($syncDb) {
+                    $banHandler->unban($ban->subject, syncDb: true);
+                }
+            }
+        }
+
+        $cleared = $guard->clearBans($type, 'cli', 'Bulk clear via CLI');
+
+        if ($this->option('json')) {
+            $this->line((string) json_encode([
+                'cleared' => $cleared,
+                'ip_cleared' => $ipCleared,
+                'user_cleared' => $userCleared,
+                'sync_db' => $syncDb,
+                'type_filter' => $type,
+            ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+
+            return self::SUCCESS;
+        }
+
+        $this->newLine();
+        $this->line('  🧹 <options=bold>AppGuard Ban Clear — Pembersihan Massal Selesai</>');
+        $this->newLine();
+
+        $this->table(
+            ['Kategori', 'Jumlah Dibersihkan'],
+            [
+                ['Blokir IP Dibuka & Reset Reputasi', "<fg=magenta;options=bold>{$ipCleared}</>"],
+                ['Blokir Pengguna Dibuka' . ($syncDb ? ' (+ Sync DB)' : ''), "<fg=yellow;options=bold>{$userCleared}</>"],
+                ['Total Ban Dibersihkan', "<fg=green;options=bold>{$cleared}</>"],
+            ],
+            $this->boxTableStyle(),
+        );
+        $this->newLine();
+
+        return self::SUCCESS;
+    }
+
     private function unknownAction(string $action): int
     {
-        $this->error("Aksi tidak dikenal: '{$action}'. Gunakan: list, show, check, stats, unban, atau sync.");
+        $this->error("Aksi tidak dikenal: '{$action}'. Gunakan: list, show, check, stats, unban, clear, atau sync.");
 
         return self::FAILURE;
     }

@@ -33,6 +33,10 @@ GUARD_MODE=enforce
 # Cache store: Disarankan 'redis' pada server produksi untuk performa cepat & multi-worker
 GUARD_CACHE_STORE=redis
 
+# Driver penyimpanan buffer telemetri insiden: 'jsonl' (default), 'redis', 'cache', 'array', atau 'null'
+GUARD_TELEMETRY_DRIVER=jsonl
+GUARD_TELEMETRY_MAX_ITEMS=5000
+
 # Ambang batas reputasi IP
 GUARD_THROTTLE_THRESHOLD=50
 GUARD_BLOCK_THRESHOLD=100

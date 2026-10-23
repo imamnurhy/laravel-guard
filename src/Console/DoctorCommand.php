@@ -3,20 +3,22 @@
 namespace AppGuard\Console;
 
 use AppGuard\Core\Contracts\Store;
+use AppGuard\Core\Contracts\VulnerabilityStore;
 use AppGuard\Core\ControlPlaneClient;
 use AppGuard\Core\Guard;
+use AppGuard\Stores\JsonFileVulnerabilityStore;
 use Illuminate\Console\Command;
 use Symfony\Component\Console\Helper\TableStyle;
 
 /**
- * Diagnostik konfigurasi, koneksi cache/Redis, file dataset, dan integrasi Control Plane.
+ * Diagnostik konfigurasi, koneksi cache/Redis, telemetry/incident store, dan integrasi Control Plane.
  */
 final class DoctorCommand extends Command
 {
     protected $signature = 'guard:doctor {--json : Tampilkan hasil diagnostik dalam format JSON}';
-    protected $description = 'Periksa kesehatan konfigurasi, cache store, dataset, dan koneksi Control Plane AppGuard';
+    protected $description = 'Periksa kesehatan konfigurasi, cache store, telemetry store, dan koneksi Control Plane AppGuard';
 
-    public function handle(Guard $guard, Store $store, ControlPlaneClient $client): int
+    public function handle(Guard $guard, Store $store, ControlPlaneClient $client, VulnerabilityStore $vulnStore): int
     {
         $checks = [];
 
@@ -47,16 +49,9 @@ final class DoctorCommand extends Command
             'detail' => "{$detCount} detektor aktif",
         ];
 
-        // 4. Direktori dataset JSONL
-        $rawDatasetPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard'));
-        $datasetPath = \AppGuard\Stores\JsonFileVulnerabilityStore::resolveFilePath($rawDatasetPath);
-        $datasetDir = dirname($datasetPath);
-        $dirWritable = is_dir($datasetDir) ? is_writable($datasetDir) : is_writable(dirname($datasetDir));
-        $checks[] = [
-            'name' => 'Dataset Forensik (JSONL)',
-            'ok' => $dirWritable,
-            'detail' => $datasetPath . ($dirWritable ? ' (writable)' : ' (tidak writable)'),
-        ];
+        // 4. Telemetry & Incident Store (multi-driver: jsonl, redis, cache, array, null)
+        $telemetryDriver = strtolower((string) config('guard.vulnerability.driver', 'jsonl'));
+        $checks[] = $this->checkTelemetryStore($telemetryDriver, $vulnStore, $storeOk);
 
         // 5. Control Plane
         $cpConfigured = $client->isConfigured();
@@ -94,5 +89,48 @@ final class DoctorCommand extends Command
 
         return $allCriticalOk ? self::SUCCESS : self::FAILURE;
     }
-}
 
+    /**
+     * @return array{name: string, ok: bool, detail: string}
+     */
+    private function checkTelemetryStore(string $driver, VulnerabilityStore $vulnStore, bool $cacheStoreOk): array
+    {
+        $buffered = $vulnStore->count();
+        $key = (string) config('guard.vulnerability.key', 'telemetry:incidents');
+
+        return match ($driver) {
+            'redis' => [
+                'name' => 'Telemetry / Incident Store',
+                'ok' => true,
+                'detail' => "driver=redis, key={$key}, buffered={$buffered} item",
+            ],
+            'cache' => [
+                'name' => 'Telemetry / Incident Store',
+                'ok' => $cacheStoreOk,
+                'detail' => "driver=cache, key={$key}, buffered={$buffered} item",
+            ],
+            'array', 'memory' => [
+                'name' => 'Telemetry / Incident Store',
+                'ok' => true,
+                'detail' => "driver=array (in-memory), buffered={$buffered} item",
+            ],
+            'null', 'none', 'off', '' => [
+                'name' => 'Telemetry / Incident Store',
+                'ok' => true,
+                'detail' => 'driver=null (nonaktif)',
+            ],
+            default => (function () use ($buffered) {
+                $rawDatasetPath = (string) config('guard.vulnerability.dataset_path', storage_path('app/guard'));
+                $datasetPath = JsonFileVulnerabilityStore::resolveFilePath($rawDatasetPath);
+                $datasetDir = dirname($datasetPath);
+                $dirWritable = is_dir($datasetDir) ? is_writable($datasetDir) : is_writable(dirname($datasetDir));
+
+                return [
+                    'name' => 'Telemetry / Incident Store',
+                    'ok' => $dirWritable,
+                    'detail' => "driver=jsonl, path={$datasetPath} (" . ($dirWritable ? 'writable' : 'tidak writable') . "), buffered={$buffered} item",
+                ];
+            })(),
+        };
+    }
+}

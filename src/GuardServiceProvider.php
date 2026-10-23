@@ -40,7 +40,9 @@ use AppGuard\Http\GuardMiddleware;
 use AppGuard\Listeners\AuthEventListener;
 use AppGuard\Stores\CacheBanRegistry;
 use AppGuard\Stores\CacheStore;
+use AppGuard\Stores\CacheVulnerabilityStore;
 use AppGuard\Stores\JsonFileVulnerabilityStore;
+use AppGuard\Stores\RedisVulnerabilityStore;
 use Illuminate\Auth\Events\Failed;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Support\ServiceProvider;
@@ -72,13 +74,32 @@ class GuardServiceProvider extends ServiceProvider
         });
 
         $this->app->singleton(VulnerabilityStore::class, function ($app) {
-            $driver = $app['config']->get('guard.vulnerability.driver', 'jsonl');
+            $cfg = $app['config']->get('guard', []);
+            $vulnCfg = $cfg['vulnerability'] ?? [];
+            $driver = strtolower(trim((string) ($vulnCfg['driver'] ?? 'jsonl')));
+            $prefix = $this->resolveKeyPrefix($cfg);
+            $rawKey = ltrim((string) ($vulnCfg['key'] ?? 'telemetry:incidents'), ':');
+            $fullKey = str_starts_with($rawKey, $prefix) ? $rawKey : ($prefix . $rawKey);
+            $maxItems = max(1, (int) ($vulnCfg['max_items'] ?? 5000));
+            $ttl = max(0, (int) ($vulnCfg['ttl'] ?? 604800));
 
             return match ($driver) {
-                'null', 'none', false => new NullVulnerabilityStore(),
-                'array', 'memory' => new ArrayVulnerabilityStore(),
+                'null', 'none', 'off', '' => new NullVulnerabilityStore(),
+                'array', 'memory' => new ArrayVulnerabilityStore($maxItems),
+                'redis' => new RedisVulnerabilityStore(
+                    $app['redis']->connection($vulnCfg['connection'] ?? 'default'),
+                    $fullKey,
+                    $maxItems,
+                ),
+                'cache' => new CacheVulnerabilityStore(
+                    $app['cache']->store($cfg['store'] ?? null),
+                    $fullKey,
+                    $maxItems,
+                    $ttl,
+                ),
                 default => new JsonFileVulnerabilityStore(
-                    $app['config']->get('guard.vulnerability.dataset_path', storage_path('app/guard/vulnerabilities.jsonl'))
+                    (string) ($vulnCfg['dataset_path'] ?? storage_path('app/guard/vulnerabilities.jsonl')),
+                    (int) ($vulnCfg['max_items'] ?? 0),
                 ),
             };
         });
