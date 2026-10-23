@@ -196,7 +196,7 @@ return [
     | - 'null'  : Nonaktifkan perekaman buffer telemetri
     */
     'vulnerability' => [
-        'driver'       => env('GUARD_TELEMETRY_DRIVER', env('GUARD_VULNERABILITY_DRIVER', 'jsonl')),
+        'driver'       => env('GUARD_TELEMETRY_DRIVER', 'jsonl'),
         'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard')),
         'key'          => env('GUARD_TELEMETRY_KEY', 'telemetry:incidents'),
         'connection'   => env('GUARD_REDIS_CONNECTION', 'default'),
