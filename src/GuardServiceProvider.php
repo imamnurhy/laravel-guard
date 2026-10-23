@@ -276,6 +276,12 @@ class GuardServiceProvider extends ServiceProvider
             __DIR__ . '/../config/guard.php' => config_path('guard.php'),
         ], 'guard-config');
 
+        $this->loadViewsFrom(__DIR__ . '/../resources/views', 'guard');
+
+        $this->publishes([
+            __DIR__ . '/../resources/views' => resource_path('views/vendor/guard'),
+        ], 'guard-views');
+
         if (! config('guard.enabled', true)) {
             return;
         }

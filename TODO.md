@@ -54,8 +54,23 @@ Menambahkan kemampuan untuk membuka/membersihkan seluruh daftar ban aktif (IP & 
 - [x] **Pengujian & Dokumentasi**:
   - Menambahkan test case `clearBans` dan `guard:ban clear` pada [smoke.php](./tests/smoke.php) serta memperbarui dokumentasi CLI di `README.md` dan `docs/05-artisan-cli.md`.
 
+### 4. Built-in Security Response Views & Custom Error Presentation
+Menyediakan halaman tampilan respons keamanan bawaan (*built-in security views*) di dalam package `laravel-guard` agar saat terjadi pemblokiran (HTTP 403) atau pembatasan laju (HTTP 429), pengguna mendapatkan tampilan web yang profesional, estetis, dan informatif (bukan sekadar teks mentah "Forbidden"):
+- [x] **Penyediaan Template Blade Bawaan (`resources/views/`)**:
+  - [x] Membuat tampilan `blocked.blade.php` (HTTP 403) dengan kartu keamanan modern, badge status, informasi insiden yang aman (tanpa membocorkan signature deteksi), dan tombol aksi.
+  - [x] Membuat tampilan `throttled.blade.php` (HTTP 429) dengan indikator cooldown dan countdown `Retry-After`.
+- [x] **Registrasi View & Publishing (`GuardServiceProvider.php`)**:
+  - [x] Mendaftarkan namespace view `$this->loadViewsFrom(...)` dengan prefix `guard::` dan tag publish `guard-views`.
+- [x] **Konfigurasi Respons & Adaptasi Middleware (`config/guard.php` & `GuardMiddleware.php`)**:
+  - [x] Menambahkan opsi konfigurasi `responses.views` di `config/guard.php` agar dapat diarahkan ke view kustom host bila diinginkan.
+  - [x] Memperbarui `GuardMiddleware::reject()` agar secara cerdas merender view HTML saat request berasal dari peramban web (browser non-JSON), dan tetap mengembalikan JsonResponse saat request berupa API/AJAX.
+- [x] **Pengujian & Validasi**:
+  - [x] Memastikan validasi sintaks PHP dan pengujian regresi di `tests/smoke.php` tetap lolos 100%.
+
+
 ---
 
 ### Backlog & Eksplorasi Mendatang
 - [ ] Evaluasi performa penanganan antrean async tebot/telemetri pada high-throughput traffic.
 - [ ] Penambahan driver store persistensi alternatif untuk environment multi-region cluster.
+

@@ -112,9 +112,23 @@ class GuardMiddleware
         $headers = $throttled ? ['Retry-After' => (string) $decision->retryAfter] : [];
 
         // Alasan sengaja tidak dikirim ke client (jangan bocorkan aturan deteksi).
-        return $request->expectsJson()
-            ? new JsonResponse(['message' => $throttled ? 'Too Many Requests.' : 'Forbidden.'], $status, $headers)
-            : new Response($throttled ? 'Too Many Requests' : 'Forbidden', $status, $headers);
+        if ($request->expectsJson()) {
+            return new JsonResponse(['message' => $throttled ? 'Too Many Requests.' : 'Forbidden.'], $status, $headers);
+        }
+
+        $viewName = $throttled
+            ? (string) config('guard.responses.views.throttle', 'guard::throttled')
+            : (string) config('guard.responses.views.block', 'guard::blocked');
+
+        if (function_exists('view') && view()->exists($viewName)) {
+            return new Response(view($viewName, [
+                'decision'   => $decision,
+                'throttled'  => $throttled,
+                'retryAfter' => $decision->retryAfter,
+            ])->render(), $status, array_merge($headers, ['Content-Type' => 'text/html; charset=UTF-8']));
+        }
+
+        return new Response($throttled ? 'Too Many Requests' : 'Forbidden', $status, $headers);
     }
 
     /**

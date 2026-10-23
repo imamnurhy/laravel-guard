@@ -365,5 +365,12 @@ $allClearedCount = $guard->clearBans(null, 'cli_test', 'Clear all bans');
 check('clearBans(null) clears all remaining IP and user bans', $allClearedCount === 2 && count($guard->bans()) === 0);
 check('user 555 is unbanned and score reset after clearBans', ! $guard->isUserBanned(555) && $guard->scoreOfUser(555) === 0);
 
+// 20. Built-in Security Response Views
+$blockedView = file_get_contents(__DIR__ . '/../resources/views/blocked.blade.php');
+$throttledView = file_get_contents(__DIR__ . '/../resources/views/throttled.blade.php');
+check('blocked view template exists and contains security card & 403', str_contains($blockedView, '403') && str_contains($blockedView, 'Akses Anda Ditahan'));
+check('throttled view template exists and contains countdown timer & 429', str_contains($throttledView, '429') && str_contains($throttledView, 'countdown-timer'));
+
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);
+

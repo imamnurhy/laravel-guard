@@ -116,6 +116,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | 4.1. Tampilan Respon Keamanan (Security Response Views)
+    |--------------------------------------------------------------------------
+    | Menentukan view template yang digunakan saat aksi Block (403) atau
+    | Throttle (429) dieksekusi terhadap request browser/web (non-JSON).
+    |
+    | Default menggunakan view bawaan package (`guard::blocked`, `guard::throttled`).
+    | Anda dapat mengarahkannya ke view kustom host (misal: 'errors.403', 'errors.429').
+    */
+    'responses' => [
+        'views' => [
+            'block'    => env('GUARD_VIEW_BLOCK', 'guard::blocked'),
+            'throttle' => env('GUARD_VIEW_THROTTLE', 'guard::throttled'),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | 5. Proteksi Akun Pengguna (Auto-Banned & Force Logout)
     |--------------------------------------------------------------------------
     | Mengambil tindakan tegas terhadap pengguna terautentikasi yang melanggar aturan.
