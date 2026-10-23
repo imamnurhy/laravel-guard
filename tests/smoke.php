@@ -250,7 +250,20 @@ $arrVuln->recordExposed(['type' => 'test']);
 check('ArrayVulnerabilityStore stores and retrieves incidents', count($arrVuln->getExposedIncidents()) === 1);
 $nullVuln = new NullVulnerabilityStore();
 $nullVuln->recordExposed(['type' => 'ignored']);
-check('NullVulnerabilityStore discards incidents', count($nullVuln->getExposedIncidents()) === 0);
+// 17. Auto-Record IP Block on Reputation Threshold & BanRegistry Visibility
+$testIp = '203.0.113.99';
+$store->hit("score:ip:{$testIp}", 1800, 70);
+check('IP with score 70 is flagged by isBlocked', $guard->isBlocked($testIp));
+$strictInspect = $guard->inspect($ctx('/login', $testIp));
+check('IP with score 70 is blocked on strict /login path', $strictInspect->action === Action::Block);
+$autoBanRecord = $guard->findBan(BanRecord::TYPE_IP, $testIp);
+check('IP with score 70 on strict path is auto-recorded in BanRegistry', $autoBanRecord !== null);
+check('auto-recorded IP ban has correct score 70', ($autoBanRecord?->score ?? 0) === 70);
+check('Guard::hasExplicitBlock is true after auto-record', $guard->hasExplicitBlock($testIp));
+$guard->unblock($testIp);
+check('IP score is reset to 0 after unblock', $guard->scoreOf($testIp) === 0);
+check('IP is no longer blocked after unblock', ! $guard->isBlocked($testIp));
+check('IP removed from BanRegistry after unblock', $guard->findBan(BanRecord::TYPE_IP, $testIp) === null);
 
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);

@@ -17,8 +17,20 @@ final class StatusCommand extends Command
         if ($ip) {
             $this->info("AppGuard Status untuk IP: {$ip}");
             $this->line('mode     : ' . ($guard->enforcing() ? 'enforce' : 'monitor'));
-            $this->line('blocked  : ' . ($guard->isBlocked($ip) ? 'yes' : 'no'));
-            $this->line('reputasi : ' . $guard->scoreOf($ip));
+
+            $score = $guard->scoreOf($ip);
+            $globalBlock = (int) (config('guard.thresholds.block') ?? 100);
+            $strictBlock = (int) (config('guard.profiles.strict.block') ?? 70);
+
+            $blockedText = match (true) {
+                $guard->hasExplicitBlock($ip) => 'yes',
+                $score >= $globalBlock => 'yes (skor reputasi mencapai batas global)',
+                $score >= $strictBlock => 'yes (terblokir pada rute profil strict seperti login)',
+                default => 'no',
+            };
+
+            $this->line('blocked  : ' . $blockedText);
+            $this->line("reputasi : {$score} (ambang batas global: {$globalBlock}, strict: {$strictBlock})");
 
             return self::SUCCESS;
         }

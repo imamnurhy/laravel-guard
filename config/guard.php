@@ -115,7 +115,6 @@ return [
     // Nama input formulir yang dikenali sebagai identitas akun (digunakan oleh brute force detector)
     'identifier_keys' => ['email', 'username', 'login'],
 
-
     /*
     |--------------------------------------------------------------------------
     | 5. Proteksi Akun Pengguna (Auto-Banned & Force Logout)
@@ -168,6 +167,18 @@ return [
         'redirect_route' => 'login',
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | 5.1. Pemblokiran IP Otomatis & Ban Registry (Auto-Block IP)
+    |--------------------------------------------------------------------------
+    | Mencatat pemblokiran IP ke dalam BanRegistry dan cache saat request menghasilkan
+    | keputusan Block, sehingga terpantau langsung pada CLI (guard:ban, guard:status).
+    */
+    'ip_ban' => [
+        'enabled'  => env('GUARD_IP_BAN_ENABLED', true),
+        // Durasi pemblokiran IP di layer cache/store (dalam detik, default 1800 = 30 menit)
+        'duration' => (int) env('GUARD_IP_BAN_DURATION', 1800),
+    ],
 
     /*
     |--------------------------------------------------------------------------
@@ -183,7 +194,6 @@ return [
         'driver'       => env('GUARD_VULNERABILITY_DRIVER', 'jsonl'),
         'dataset_path' => env('GUARD_DATASET_PATH', storage_path('app/guard')),
     ],
-
 
     /*
     |--------------------------------------------------------------------------
@@ -239,7 +249,6 @@ return [
             'description' => 'Muatan teks anomali dengan tingkat keacakan berlebih (Shannon Entropy)',
         ],
     ],
-
 
     /*
     |--------------------------------------------------------------------------
@@ -336,7 +345,6 @@ return [
             ],
         ],
     ],
-
 
     /*
     |--------------------------------------------------------------------------

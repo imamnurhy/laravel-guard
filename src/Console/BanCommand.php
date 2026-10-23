@@ -183,7 +183,7 @@ final class BanCommand extends Command
         $detailRows = [
             ['Tipe', strtoupper($type)],
             ['Subject', $record ? $record->label() : $subject],
-            ['Status Blokir', $isBlocked ? '<fg=red;options=bold>YA (Aktif di Store)</>' : '<fg=green>Tidak</>'],
+            ['Status Blokir', $isBlocked ? '<fg=red;options=bold>YA (Aktif di Store / Reputasi Tinggi)</>' : '<fg=green>Tidak</>'],
             ['Skor Reputasi Saat Ini', $this->formatScore(max($score, $record?->score ?? 0))],
             ['Sumber / Detektor', $record?->source ?: '-'],
             ['Alasan', $record?->reason ?: '-'],
@@ -477,6 +477,27 @@ final class BanCommand extends Command
                     bannedAt: isset($meta['banned_at']) ? (int) strtotime((string) $meta['banned_at']) : 0,
                     expiresAt: null,
                     ip: isset($meta['ip']) ? (string) $meta['ip'] : null,
+                );
+            }
+        }
+
+        // Fallback bila IP memiliki skor reputasi aktif yang mencapai threshold
+        if ($type === BanRecord::TYPE_IP) {
+            $score = $guard->scoreOf($subject);
+            $strictThreshold = (int) (config('guard.profiles.strict.block') ?? 70);
+            $globalThreshold = (int) (config('guard.thresholds.block') ?? 100);
+            if ($score >= $strictThreshold) {
+                return new BanRecord(
+                    type: BanRecord::TYPE_IP,
+                    subject: $subject,
+                    reason: $score >= $globalThreshold
+                        ? "Skor reputasi ({$score}) mencapai ambang batas blokir global"
+                        : "Skor reputasi ({$score}) mencapai ambang batas blokir profil strict (seperti /login)",
+                    source: 'reputation',
+                    score: $score,
+                    bannedAt: time(),
+                    expiresAt: null,
+                    ip: $subject,
                 );
             }
         }

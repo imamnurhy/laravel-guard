@@ -241,7 +241,7 @@ final class Guard
             return $this->log($ctx, new Decision(
                 Action::Block,
                 100,
-                [new Signal('blocklist', 100, 'IP is manually blocked')],
+                [new Signal('blocklist', 100, 'IP is blocked')],
             ));
         }
 
@@ -318,6 +318,11 @@ final class Guard
         $banThreshold = (int) ($this->config['user_ban']['threshold'] ?? 100);
         if ($effectiveMode !== 'monitor' && $score >= $banThreshold && $ctx->userId !== null) {
             $this->evaluateUserPenalty($ctx, $score, implode('; ', $decision->reasons()), signals: $enforcingSignals);
+        }
+
+        // Evaluasi pemblokiran IP otomatis jika request diputuskan Block (Auto-Block IP)
+        if ($effectiveMode !== 'monitor' && $action === Action::Block && $ctx->ip !== '' && $ctx->ip !== '127.0.0.1') {
+            $this->evaluateIpBlock($ctx, $score, $blockAt, $enforcingSignals, $resolved['profile_name'] ?? null);
         }
 
         if ($this->onScoredCallback !== null) {
@@ -533,6 +538,20 @@ final class Guard
 
     public function isBlocked(string $ip): bool
     {
+        if ($this->store->has($this->blockKey($ip))) {
+            return true;
+        }
+
+        // Jika skor reputasi IP saat ini mencapai atau melampaui ambang batas blokir
+        $globalBlock = (int) ($this->config['thresholds']['block'] ?? 100);
+        $strictBlock = (int) ($this->config['profiles']['strict']['block'] ?? 70);
+        $minBlock = min($globalBlock, $strictBlock);
+
+        return $this->scoreOf($ip) >= $minBlock;
+    }
+
+    public function hasExplicitBlock(string $ip): bool
+    {
         return $this->store->has($this->blockKey($ip));
     }
 
@@ -742,6 +761,63 @@ final class Guard
         }
     }
 
+    private function evaluateIpBlock(
+        RequestContext $ctx,
+        int $score,
+        int $blockAt,
+        array $signals = [],
+        ?string $profileName = null
+    ): void {
+        if (! ($this->config['ip_ban']['enabled'] ?? true)) {
+            return;
+        }
+
+        $ip = $ctx->ip;
+        if ($ip === '' || $ip === '127.0.0.1') {
+            return;
+        }
+
+        // Jika pemblokiran ini hanya berasal dari sinyal ephemeral tanpa persistensi dan reputasi IP sendiri masih 0
+        // (contoh: brute force pair pada login), jangan hard-ban IP secara global agar path lain tetap diizinkan
+        $hasPersistentSignal = false;
+        foreach ($signals as $s) {
+            if ($s->persist) {
+                $hasPersistentSignal = true;
+                break;
+            }
+        }
+        $ipReputation = $this->store->count("score:ip:{$ip}");
+
+        // Rekam ban jika IP memang memiliki skor reputasi persisten >= blockAt ATAU ada sinyal persisten
+        if ($ipReputation < $blockAt && ! $hasPersistentSignal) {
+            return;
+        }
+
+        $ttl = (int) ($this->config['ip_ban']['duration'] ?? $this->config['reputation_ttl'] ?? 1800);
+
+        // Ekstraksi nama detektor pemicu
+        $detectors = array_unique(array_filter(array_map(fn (Signal $s) => $s->detector, $signals)));
+        $source = ! empty($detectors) ? implode(',', $detectors) : 'reputation';
+
+        // Susun deskripsi alasan
+        $signalReasons = array_filter(array_map(fn (Signal $s) => $s->reason, $signals));
+        $reason = ! empty($signalReasons)
+            ? implode('; ', $signalReasons)
+            : "Skor reputasi ({$score}) mencapai batas pemblokiran ({$blockAt})";
+
+        if ($profileName) {
+            $reason .= " [profil: {$profileName}, path: '{$ctx->path}']";
+        }
+
+        $this->block(
+            ip: $ip,
+            seconds: $ttl,
+            reason: $reason,
+            source: $source,
+            score: $score
+        );
+    }
+
     private function reputation(RequestContext $ctx): int
     {
         $ip = $this->store->count("score:ip:{$ctx->ip}");
@@ -830,12 +906,15 @@ final class Guard
         $profiles = array_replace_recursive($presets, $this->config['profiles'] ?? []);
 
         $matched = [];
+        $profileName = null;
         if (! empty($overrides['profile']) && isset($profiles[$overrides['profile']])) {
             $matched = (array) $profiles[$overrides['profile']];
+            $profileName = (string) $overrides['profile'];
         } else {
-            foreach ($this->config['profiles'] ?? [] as $profile) {
+            foreach ($this->config['profiles'] ?? [] as $name => $profile) {
                 if (! empty($profile['paths']) && PathMatcher::matches((array) $profile['paths'], $path) !== null) {
                     $matched = (array) $profile;
+                    $profileName = is_string($name) ? $name : null;
                     break;
                 }
             }
@@ -849,6 +928,7 @@ final class Guard
             'mode' => isset($merged['mode']) ? (string) $merged['mode'] : null,
             'detectors' => isset($merged['detectors']) && is_array($merged['detectors']) ? $merged['detectors'] : null,
             'bypass' => ! empty($merged['bypass']),
+            'profile_name' => $profileName,
         ];
     }
 
