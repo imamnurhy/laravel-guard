@@ -30,8 +30,7 @@ return [
     'prefix_by_tenant' => env('GUARD_PREFIX_BY_TENANT', false),
 
     // Channel log Laravel untuk pencatatan event keamanan (null = default logging channel)
-    'log_channel' => env('GUARD_LOG_CHANNEL'),
-
+    'log_channel' => env('GUARD_LOG_CHANNEL', 'guard'),
 
     /*
     |--------------------------------------------------------------------------
