@@ -27,7 +27,7 @@ Menyediakan dan menyesuaikan sistem penyimpanan buffer telemetri / insiden keama
   - [x] Driver `cache`: Menyimpan buffer telemetri menggunakan `Illuminate\Contracts\Cache\Repository` (mengikuti store cache aktif) dengan mekanisme ring-buffer / array terbatasi dan TTL.
   - [x] Driver `jsonl`, `array`, & `null`: Menyesuaikan implementasi method kontrak baru (`pullBatch` / penghapusan batch setelah dikirim dan `count`) pada store eksisting agar seluruh driver memiliki perilaku yang seragam.
 - [x] **Penyesuaian Command CLI (`ShipTelemetryCommand` & `DoctorCommand`)**:
-  - [x] Refactor `guard:ship-telemetry` ([ShipTelemetryCommand.php](./src/Console/ShipTelemetryCommand.php)) agar mengambil dan menghapus batch rekaman langsung melalui abstraksi store aktif (mendukung penuh pengiriman dari driver `redis`, `cache`, maupun `jsonl` ke Control Plane).
+  - [x] Refactor `guard:ship-telemetry` ([ShipTelemetryCommand.php](./src/Console/ShipTelemetryCommand.php)) agar mengambil dan menghapus batch rekaman langsung melalui abstraksi store aktif (mendukung penuh pengiriman dari driver `redis`, `cache`, maupun `jsonl` ke Control Plane), serta menambahkan opsi `--clear [--force]` untuk mengosongkan buffer telemetri secara manual.
   - [x] Perbarui `guard:doctor` ([DoctorCommand.php](./src/Console/DoctorCommand.php)) agar pemeriksaan kesehatan *Telemetry / Incident Store* menyesuaikan dengan driver aktif (`redis`, `cache`, atau `jsonl`), tidak lagi hanya mengecek izin tulis direktori `.jsonl`.
 - [x] **Pengujian & Dokumentasi**:
   - [x] Menambahkan unit/smoke test di `tests/smoke.php` untuk menguji perekaman telemetri, pembatasan kapasitas buffer, dan proses *ship telemetry* pada driver `jsonl`, `redis`, dan `cache`.

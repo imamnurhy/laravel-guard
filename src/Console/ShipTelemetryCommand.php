@@ -8,12 +8,39 @@ use Illuminate\Console\Command;
 
 final class ShipTelemetryCommand extends Command
 {
-    protected $signature = 'guard:ship-telemetry {--batch-size=100 : Jumlah rekaman per batch pengiriman}';
-    protected $description = 'Kirim batch rekaman telemetri insiden dari buffer aktif (jsonl, redis, atau cache) ke Centralized Control Plane';
+    protected $signature = 'guard:ship-telemetry
+        {--batch-size=100 : Jumlah rekaman per batch pengiriman}
+        {--clear : Kosongkan seluruh antrean buffer telemetri tanpa mengirim ke Control Plane}
+        {--force : Jalankan --clear tanpa konfirmasi interaktif}';
+
+    protected $description = 'Kirim atau bersihkan batch rekaman telemetri insiden pada buffer aktif (jsonl, redis, atau cache)';
 
     public function handle(ControlPlaneClient $client, VulnerabilityStore $store): int
     {
         $driver = strtolower((string) config('guard.vulnerability.driver', 'jsonl'));
+
+        if ($this->option('clear')) {
+            $total = $store->count();
+            if ($total === 0) {
+                $this->info("Buffer telemetri (driver: {$driver}) sudah kosong.");
+
+                return self::SUCCESS;
+            }
+
+            if (! $this->option('force') && $this->input->isInteractive()) {
+                if (! $this->confirm("Kosongkan {$total} rekaman pada buffer telemetri ({$driver}) tanpa mengirim ke Control Plane?", false)) {
+                    $this->line('Dibatalkan.');
+
+                    return self::SUCCESS;
+                }
+            }
+
+            $store->clear();
+            $this->info("✓ Berhasil mengosongkan {$total} rekaman dari buffer telemetri (driver: {$driver}).");
+
+            return self::SUCCESS;
+        }
+
         $batchSize = max(1, (int) $this->option('batch-size'));
 
         $chunk = $store->peekBatch($batchSize);
