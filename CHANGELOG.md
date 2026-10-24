@@ -7,6 +7,22 @@ Dokumen ini mencatat seluruh riwayat rilis, perubahan fitur, perbaikan bug, dan 
 ## [2026-10-24]
 
 ### Added
+- **Multi-Driver Telemetry & Incident Store (`redis`, `cache`, `jsonl`, `array`, `null`)** ([VulnerabilityStore.php](./src/Core/Contracts/VulnerabilityStore.php), [RedisVulnerabilityStore.php](./src/Stores/RedisVulnerabilityStore.php), [CacheVulnerabilityStore.php](./src/Stores/CacheVulnerabilityStore.php), [JsonFileVulnerabilityStore.php](./src/Stores/JsonFileVulnerabilityStore.php), [guard.php](./config/guard.php), [GuardServiceProvider.php](./src/GuardServiceProvider.php)):
+  - Abstraksi penyimpanan buffer telemetri insiden keamanan multi-driver yang dapat dipilih melalui konfigurasi tunggal `GUARD_TELEMETRY_DRIVER` atau `GUARD_STORE`.
+  - Penambahan kontrak antrean batch (`pullBatch(int $limit = 100): array`, `count(): int`) pada `VulnerabilityStore`.
+  - Driver `redis` berbasis atomic operations (`RPUSH`, `LRANGE`, `LTRIM`) dengan batasan kapasitas antrean `max_items`.
+  - Driver `cache` berbasis ring-buffer array terbatasi dengan masa retensi TTL.
+  - Refactor command `php artisan guard:ship-telemetry` ([ShipTelemetryCommand.php](./src/Console/ShipTelemetryCommand.php)) dengan dukungan opsi `--clear [--force]` untuk mengosongkan buffer telemetri aktif lintas driver.
+  - Perbaruan `php artisan guard:doctor` ([DoctorCommand.php](./src/Console/DoctorCommand.php)) untuk memeriksa kesiapan dan integritas store telemetri aktif.
+- **Fitur Massal Clear / Flush Ban (`guard:ban clear`)** ([Guard.php](./src/Core/Guard.php), [BanRegistry.php](./src/Core/Contracts/BanRegistry.php), [CacheBanRegistry.php](./src/Stores/CacheBanRegistry.php), [ArrayBanRegistry.php](./src/Core/Stores/ArrayBanRegistry.php), [BanCommand.php](./src/Console/BanCommand.php)):
+  - Method `Guard::clearBans(?string $type = null, string $liftedBy = 'cli', string $reason = 'Bulk clear'): int` untuk membuka seluruh blokir aktif (IP dan/atau User) secara massal, membersihkan key cache store, skor reputasi, force logout, serta menembakkan event `BanLifted`.
+  - Sub-command CLI `php artisan guard:ban clear` (alias `flush` atau `guard:ban unban --all`) dengan dukungan opsi `--type=ip|user`, `--sync-db`, `--force`, dan `--json` beserta konfirmasi jumlah entri dan tabel ringkasan eksekusi.
+- **Built-in Security Response Views & Custom Error Presentation** ([blocked.blade.php](./resources/views/blocked.blade.php), [throttled.blade.php](./resources/views/throttled.blade.php), [GuardServiceProvider.php](./src/GuardServiceProvider.php), [GuardMiddleware.php](./src/Http/GuardMiddleware.php), [guard.php](./config/guard.php)):
+  - Halaman respons visual profesional bawaan library untuk HTTP 403 (`guard::blocked`) dan HTTP 429 (`guard::throttled`) dengan desain modern, informasi insiden yang aman, countdown `Retry-After`, dan opsi override ke custom view aplikasi host via `guard.responses.views`.
+  - Deteksi peramban web otomatis pada `GuardMiddleware::reject()` agar merender HTML view untuk request browser non-JSON dan tetap merespons JsonResponse untuk request API/AJAX.
+- **Standardisasi Output Tabel Terminal Bergaya Box-Drawing (`TableStyle`)** ([StatusCommand.php](./src/Console/StatusCommand.php), [UserStatusCommand.php](./src/Console/UserStatusCommand.php), [BanCommand.php](./src/Console/BanCommand.php)):
+  - Format tabel visual terstruktur, badge warna status, dan konsistensi header box-drawing pada seluruh perintah CLI inspeksi (`guard:status`, `guard:user-status`, `guard:ban list`).
+  - Penambahan opsi `--json` pada `guard:status` dan `guard:user-status` untuk kemudahan otomasi monitoring dan skrip healthcheck.
 - **Otomatisasi Eksekusi Banned IPs dari Snapshot Control Plane** ([SyncCommand.php](./src/Console/SyncCommand.php)):
   - Iterasi array `banned_ips` dari snapshot dan eksekusi langsung ke `$guard->block($ip, $banDuration, ...)` sehingga key individual `block:ip:{ip}` aktif di Redis/Cache Store dan tercatat di `BanRegistry`.
   - Mekanisme **auto-unblock** (`$guard->unblock()`) otomatis untuk IP yang telah dicabut dari snapshot Control Plane.
