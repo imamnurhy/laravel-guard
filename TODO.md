@@ -13,7 +13,7 @@
 
 ## 🔥 Prioritas Pengembangan
 
-> Seluruh item dari rilis sebelumnya (`[2026-10-19]`) dan rilis (`[2026-10-23]`) telah selesai diuji dan dipindahkan ke [`CHANGELOG.md`](./CHANGELOG.md).
+> Seluruh item dari rilis sebelumnya (`[2026-10-19]`), rilis (`[2026-10-23]`), dan rilis (`[2026-10-24]`) telah selesai diuji dan dipindahkan ke [`CHANGELOG.md`](./CHANGELOG.md).
 
 ### 1. Multi-Driver Telemetry & Incident Store (`jsonl`, `redis`, `cache`)
 Menyediakan dan menyesuaikan sistem penyimpanan buffer telemetri / insiden keamanan agar mendukung berbagai driver penyimpanan (`jsonl`, `redis`, `cache`) yang dapat dipilih cukup melalui satu konfigurasi driver tunggal (`GUARD_STORE` / `GUARD_TELEMETRY_DRIVER`):

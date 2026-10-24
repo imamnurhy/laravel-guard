@@ -14,7 +14,7 @@ class WebhookController
         $signature = $request->header('X-Guard-Signature');
         $timestamp = (int) $request->header('X-Guard-Timestamp');
         $nonce = $request->header('X-Guard-Nonce');
-        $appKey = $request->header('X-Guard-App-Key');
+        $appKey = (string) ($request->header('X-Guard-App-Key') ?: config('guard.control_plane.app_key', 'default'));
 
         // 1. Verifikasi Header Wajib
         if (! $signature || ! $timestamp || ! $nonce) {

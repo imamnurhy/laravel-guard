@@ -4,6 +4,28 @@ Dokumen ini mencatat seluruh riwayat rilis, perubahan fitur, perbaikan bug, dan 
 
 ---
 
+## [2026-10-24]
+
+### Added
+- **Otomatisasi Eksekusi Banned IPs dari Snapshot Control Plane** ([SyncCommand.php](./src/Console/SyncCommand.php)):
+  - Iterasi array `banned_ips` dari snapshot dan eksekusi langsung ke `$guard->block($ip, $banDuration, ...)` sehingga key individual `block:ip:{ip}` aktif di Redis/Cache Store dan tercatat di `BanRegistry`.
+  - Mekanisme **auto-unblock** (`$guard->unblock()`) otomatis untuk IP yang telah dicabut dari snapshot Control Plane.
+  - Penggunaan masa ban (TTL) terkonfigurasi dari `config('guard.ip_ban.duration', 86400)` untuk mencegah memory leak dan false-positive pada IP dinamis.
+  - Penambahan eksekusi blokir IP snapshot pada fungsi `loadFallbackSnapshot()` saat Control Plane offline atau Circuit Breaker terbuka.
+  - Refresh perpanjangan TTL masa ban pada Redis saat respons sinkronisasi menerima status HTTP 304 (Not Modified).
+- **Pertahanan Berlapis (*Defense-in-Depth*) di Fase Inspeksi** ([Guard.php](./src/Core/Guard.php)):
+  - Menambahkan inspeksi langsung ke cache array `guard:{$tenant}:banned_ips` pada `Guard::inspect()` sebagai proteksi fail-safe instan di level middleware.
+
+### Fixed
+- **Fallback App Key Webhook Controller** ([WebhookController.php](./src/Http/WebhookController.php)):
+  - Menambahkan fallback `config('guard.control_plane.app_key')` jika header `X-Guard-App-Key` tidak terkirim agar namespace cache tenant tidak rusak (`guard::banned_ips`).
+- **Testing & Validasi**:
+  - Validasi sintaksis `php -l` pada seluruh berkas yang dimodifikasi (lolos 100%).
+  - Uji sinkronisasi CLI `php artisan guard:sync --force` dan verifikasi monitor `php artisan guard:ban`.
+  - Simulasi request HTTP real dari IP blacklist menghasilkan HTTP 403 (Akses Dibatasi).
+
+---
+
 ## [2026-10-23]
 
 ### Added

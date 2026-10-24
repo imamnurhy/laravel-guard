@@ -46,6 +46,7 @@ final class SyncCommand extends Command
             if ($response->status() === 304) {
                 Cache::forget($cbKey);
                 $this->info('✓ Dynamic rules sudah up-to-date (HTTP 304 Not Modified).');
+                $this->refreshBannedIpsTtl($appKey);
                 return self::SUCCESS;
             }
 
@@ -68,11 +69,9 @@ final class SyncCommand extends Command
                     $this->info('✓ Disinkronkan dynamic thresholds.');
                 }
 
-                // 3. Simpan IP Blacklist ke Cache Lokal Tenant
+                // 3. Simpan & Aktifkan IP Blacklist ke Cache Lokal Tenant dengan Masa Ban (TTL)
                 if (! empty($data['banned_ips']) && is_array($data['banned_ips'])) {
-                    $bannedKey = "guard:{$appKey}:banned_ips";
-                    Cache::put($bannedKey, $data['banned_ips'], 86400);
-                    $this->info('✓ Disinkronkan ' . count($data['banned_ips']) . ' banned IPs.');
+                    $this->syncBannedIps($appKey, $data['banned_ips']);
                 }
 
                 // 4. Simpan Centralized Policy jika ada
@@ -193,7 +192,7 @@ final class SyncCommand extends Command
                 $ruleStore->setDynamicThresholds($data['thresholds']);
             }
             if (! empty($data['banned_ips']) && is_array($data['banned_ips'])) {
-                Cache::put("guard:{$appKey}:banned_ips", $data['banned_ips'], 86400);
+                $this->syncBannedIps($appKey, $data['banned_ips'], isFallback: true);
             }
             if (! empty($data['policy']) && is_array($data['policy'])) {
                 $ruleStore->setPolicy($data['policy']);
@@ -202,5 +201,56 @@ final class SyncCommand extends Command
         } catch (\Throwable $e) {
             // Fail-open silent
         }
+    }
+
+    private function syncBannedIps(string $appKey, array $ips, bool $isFallback = false): void
+    {
+        $bannedKey = "guard:{$appKey}:banned_ips";
+        $previousBanned = (array) Cache::get($bannedKey, []);
+        $newBanned = array_values(array_unique(array_filter($ips)));
+        $banDuration = (int) config('guard.ip_ban.duration', 86400);
+
+        Cache::put($bannedKey, $newBanned, $banDuration);
+
+        if (app()->bound(\AppGuard\Core\Guard::class)) {
+            $guard = app(\AppGuard\Core\Guard::class);
+            $reason = $isFallback ? 'Fallback Snapshot Banned IP' : 'Control Plane Snapshot Banned IP';
+
+            // A. Aktifkan / perpanjang masa ban untuk semua IP di snapshot
+            foreach ($newBanned as $bannedIp) {
+                $guard->block((string) $bannedIp, $banDuration, $reason, 'control_plane');
+            }
+
+            // B. Otomatis unblock jika ada IP yang sudah dicabut dari snapshot
+            if (! $isFallback && $previousBanned !== []) {
+                $removedIps = array_diff($previousBanned, $newBanned);
+                foreach ($removedIps as $unbanIp) {
+                    $guard->unblock((string) $unbanIp, 'control_plane', 'Dihapus dari Snapshot Banned IPs');
+                }
+            }
+        }
+
+        $label = $isFallback ? 'dari snapshot lokal' : 'ke engine Guard';
+        $this->info("✓ Disinkronkan dan diaktifkan " . count($newBanned) . " banned IPs {$label} (TTL: {$banDuration}s).");
+    }
+
+    private function refreshBannedIpsTtl(string $appKey): void
+    {
+        $bannedKey = "guard:{$appKey}:banned_ips";
+        $currentBanned = (array) Cache::get($bannedKey, []);
+        if (empty($currentBanned)) {
+            return;
+        }
+
+        $banDuration = (int) config('guard.ip_ban.duration', 86400);
+        Cache::put($bannedKey, $currentBanned, $banDuration);
+
+        if (app()->bound(\AppGuard\Core\Guard::class)) {
+            $guard = app(\AppGuard\Core\Guard::class);
+            foreach ($currentBanned as $bannedIp) {
+                $guard->block((string) $bannedIp, $banDuration, 'Control Plane Snapshot Banned IP (304 Refreshed)', 'control_plane');
+            }
+        }
+        $this->info("✓ Memperbarui masa aktif " . count($currentBanned) . " banned IPs (TTL: {$banDuration}s).");
     }
 }

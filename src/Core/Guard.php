@@ -250,6 +250,20 @@ final class Guard
             ));
         }
 
+        // Pertahanan Berlapis (Defense-in-Depth): Cek blacklist snapshot cache tenant
+        $tenant = $ctx->attributes['tenant'] ?? $this->currentTenant();
+        if ($tenant && class_exists(\Illuminate\Support\Facades\Cache::class) && \Illuminate\Support\Facades\Cache::getFacadeRoot() !== null) {
+            $bannedKey = "guard:{$tenant}:banned_ips";
+            $bannedIps = (array) \Illuminate\Support\Facades\Cache::get($bannedKey, []);
+            if (! empty($bannedIps) && in_array($ctx->ip, $bannedIps, true)) {
+                return $this->log($ctx, new Decision(
+                    Action::Block,
+                    100,
+                    [new Signal('blocklist', 100, 'IP is in snapshot banned_ips')],
+                ));
+            }
+        }
+
         // Cek jika user ID sedang dalam status banned di cache
         if ($ctx->userId !== null && $this->store->has("block:user:{$ctx->userId}")) {
             return $this->log($ctx, new Decision(
