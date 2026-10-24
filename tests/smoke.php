@@ -369,7 +369,7 @@ check('user 555 is unbanned and score reset after clearBans', ! $guard->isUserBa
 $blockedView = file_get_contents(__DIR__ . '/../resources/views/blocked.blade.php');
 $throttledView = file_get_contents(__DIR__ . '/../resources/views/throttled.blade.php');
 check('blocked view template exists and contains security card & 403', str_contains($blockedView, '403') && str_contains($blockedView, 'Akses Anda Ditahan'));
-check('throttled view template exists and contains countdown timer & 429', str_contains($throttledView, '429') && str_contains($throttledView, 'countdown-timer'));
+check('throttled view template exists and contains countdown timer & 429', str_contains($throttledView, '429') && str_contains($throttledView, 'id="timer"'));
 
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);

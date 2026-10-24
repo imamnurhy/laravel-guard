@@ -17,179 +17,129 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #f8fafc;
-            color: #1e293b;
-            padding: 1.5rem;
+            background: #ffffff;
+            color: #111827;
+            padding: 2rem 1.5rem;
         }
 
-        .container {
+        .wrapper {
             width: 100%;
             max-width: 480px;
         }
 
-        .card {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 2.25rem 2rem;
-            text-align: center;
-        }
-
-        .icon-wrapper {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 1.25rem;
-            border-radius: 50%;
-            background: #fef3c7;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #d97706;
-        }
-
-        .icon-wrapper svg {
-            width: 24px;
-            height: 24px;
-        }
-
-        .code-badge {
-            display: inline-block;
+        .code {
             font-size: 0.8125rem;
             font-weight: 600;
             color: #d97706;
-            margin-bottom: 0.5rem;
-            letter-spacing: 0.025em;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.625rem;
+            text-transform: uppercase;
         }
 
         h1 {
-            font-size: 1.375rem;
-            font-weight: 700;
-            color: #0f172a;
+            font-size: 1.625rem;
+            font-weight: 600;
+            color: #111827;
+            letter-spacing: -0.025em;
             margin-bottom: 0.75rem;
+            line-height: 1.3;
         }
 
         p.desc {
-            font-size: 0.875rem;
-            line-height: 1.55;
-            color: #64748b;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            color: #4b5563;
             margin-bottom: 1.5rem;
         }
 
-        .countdown-box {
-            background: #f8fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 1rem;
-            margin-bottom: 1.75rem;
+        .timer-info {
+            font-size: 0.875rem;
+            color: #6b7280;
+            margin-bottom: 2rem;
         }
 
-        .countdown-title {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.025em;
-            color: #64748b;
-            margin-bottom: 0.25rem;
+        .timer-val {
             font-weight: 600;
-        }
-
-        .countdown-timer {
-            font-size: 1.75rem;
-            font-weight: 700;
-            color: #0f172a;
+            color: #111827;
             font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
 
         .actions {
             display: flex;
-            gap: 0.75rem;
-            justify-content: center;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 2.5rem;
         }
 
         .btn {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            padding: 0.625rem 1.125rem;
-            border-radius: 8px;
             font-size: 0.875rem;
             font-weight: 500;
             text-decoration: none;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.15s ease;
             cursor: pointer;
+            border: none;
         }
 
         .btn-primary {
-            background: #2563eb;
+            background: #111827;
             color: #ffffff;
-            border: 1px solid #2563eb;
         }
 
         .btn-primary:hover:not(:disabled) {
-            background: #1d4ed8;
-            border-color: #1d4ed8;
+            background: #374151;
         }
 
         .btn-primary:disabled {
-            background: #94a3b8;
-            border-color: #94a3b8;
+            background: #e5e7eb;
+            color: #9ca3af;
             cursor: not-allowed;
-            opacity: 0.7;
         }
 
-        .btn-secondary {
-            background: #ffffff;
-            color: #475569;
-            border: 1px solid #cbd5e1;
+        .btn-link {
+            color: #4b5563;
+            padding: 0.5rem 0.25rem;
+            background: transparent;
         }
 
-        .btn-secondary:hover {
-            background: #f8fafc;
-            color: #1e293b;
-            border-color: #94a3b8;
+        .btn-link:hover {
+            color: #111827;
+            text-decoration: underline;
         }
 
-        .footer {
-            margin-top: 1.25rem;
+        .meta {
+            border-top: 1px solid #f3f4f6;
+            padding-top: 1.25rem;
             font-size: 0.75rem;
-            color: #94a3b8;
+            color: #9ca3af;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <div class="icon-wrapper">
-                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-            </div>
+    <div class="wrapper">
+        <div class="code">429 &bull; Terlalu Banyak Permintaan</div>
+        <h1>Laju Permintaan Dibatasi</h1>
+        <p class="desc">
+            Anda mengirimkan terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sejenak hingga batas cooldown selesai sebelum mencoba kembali.
+        </p>
 
-            <div class="code-badge">429 &bull; TERLALU BANYAK PERMINTAAN</div>
-            <h1>Laju Permintaan Dibatasi</h1>
-            <p class="desc">
-                Anda mengirimkan terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sejenak hingga batas waktu cooldown selesai.
-            </p>
+        <div class="timer-info">
+            Dapat mencoba kembali dalam <span class="timer-val" id="timer">{{ max(1, (int) ($retryAfter ?? 60)) }} detik</span>
+        </div>
 
-            <div class="countdown-box">
-                <div class="countdown-title">Dapat mencoba kembali dalam</div>
-                <div class="countdown-timer" id="timer">{{ max(1, (int) ($retryAfter ?? 60)) }}s</div>
-            </div>
+        <div class="actions">
+            <button type="button" id="btn-reload" onclick="window.location.reload()" class="btn btn-primary" disabled>Muat Ulang Halaman</button>
+            <a href="{{ url('/') }}" class="btn btn-link">Ke Beranda</a>
+        </div>
 
-            <div class="actions">
-                <button type="button" id="btn-reload" onclick="window.location.reload()" class="btn btn-primary" disabled>
-                    Muat Ulang Halaman
-                </button>
-                <a href="{{ url('/') }}" class="btn btn-secondary">
-                    Ke Beranda
-                </a>
-            </div>
-
-            <div class="footer">
-                Sistem Keamanan &bull; {{ config('app.name', 'Portal Aplikasi') }}
-            </div>
+        <div class="meta">
+            IP: {{ request()->ip() ?? 'N/A' }} &bull; {{ now()->setTimezone(config('app.timezone', 'UTC'))->format('d M Y, H:i T') }} &bull; {{ config('app.name', 'Sistem Keamanan') }}
         </div>
     </div>
-
 
     <script>
         (function() {
@@ -201,12 +151,12 @@
                 seconds--;
                 if (seconds <= 0) {
                     clearInterval(interval);
-                    timerEl.textContent = "Siap";
+                    timerEl.textContent = "Sekarang (Siap)";
                     timerEl.style.color = "#16a34a";
                     btnReload.removeAttribute('disabled');
                     btnReload.textContent = "Coba Lagi Sekarang";
                 } else {
-                    timerEl.textContent = seconds + "s";
+                    timerEl.textContent = seconds + " detik";
                 }
             }, 1000);
         })();

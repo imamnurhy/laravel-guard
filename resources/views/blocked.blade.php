@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>403 — Akses Ditolak</title>
+    <title>403 — Akses Dibatasi</title>
     <style>
         * {
             box-sizing: border-box;
@@ -17,180 +17,106 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            background-color: #f8fafc;
-            color: #1e293b;
-            padding: 1.5rem;
+            background: #ffffff;
+            color: #111827;
+            padding: 2rem 1.5rem;
         }
 
-        .container {
+        .wrapper {
             width: 100%;
             max-width: 480px;
         }
 
-        .card {
-            background: #ffffff;
-            border: 1px solid #e2e8f0;
-            border-radius: 12px;
-            padding: 2.25rem 2rem;
-            text-align: center;
-        }
-
-        .icon-wrapper {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 1.25rem;
-            border-radius: 50%;
-            background: #fee2e2;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #dc2626;
-        }
-
-        .icon-wrapper svg {
-            width: 24px;
-            height: 24px;
-        }
-
-        .code-badge {
-            display: inline-block;
+        .code {
             font-size: 0.8125rem;
             font-weight: 600;
-            color: #dc2626;
-            margin-bottom: 0.5rem;
-            letter-spacing: 0.025em;
+            color: #6b7280;
+            letter-spacing: 0.05em;
+            margin-bottom: 0.625rem;
+            text-transform: uppercase;
         }
 
         h1 {
-            font-size: 1.375rem;
-            font-weight: 700;
-            color: #0f172a;
+            font-size: 1.625rem;
+            font-weight: 600;
+            color: #111827;
+            letter-spacing: -0.025em;
             margin-bottom: 0.75rem;
+            line-height: 1.3;
         }
 
         p.desc {
-            font-size: 0.875rem;
-            line-height: 1.55;
-            color: #64748b;
-            margin-bottom: 1.5rem;
-        }
-
-        .meta-box {
-            background: #f1f5f9;
-            border-radius: 8px;
-            padding: 0.875rem 1rem;
-            margin-bottom: 1.75rem;
-            font-size: 0.8125rem;
-            display: flex;
-            justify-content: space-between;
-            text-align: left;
-        }
-
-        .meta-item .label {
-            display: block;
-            color: #64748b;
-            font-size: 0.6875rem;
-            margin-bottom: 0.2rem;
-            text-transform: uppercase;
-            font-weight: 600;
-            letter-spacing: 0.025em;
-        }
-
-        .meta-item .value {
-            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-            color: #334155;
-            font-weight: 600;
+            font-size: 0.9375rem;
+            line-height: 1.6;
+            color: #4b5563;
+            margin-bottom: 2rem;
         }
 
         .actions {
             display: flex;
-            gap: 0.75rem;
-            justify-content: center;
+            gap: 1rem;
+            align-items: center;
+            margin-bottom: 2.5rem;
         }
 
         .btn {
             display: inline-flex;
             align-items: center;
-            justify-content: center;
-            padding: 0.625rem 1.125rem;
-            border-radius: 8px;
             font-size: 0.875rem;
             font-weight: 500;
             text-decoration: none;
-            transition: background-color 0.15s ease, border-color 0.15s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: all 0.15s ease;
             cursor: pointer;
+            border: none;
         }
 
         .btn-primary {
-            background: #2563eb;
+            background: #111827;
             color: #ffffff;
-            border: 1px solid #2563eb;
         }
 
         .btn-primary:hover {
-            background: #1d4ed8;
-            border-color: #1d4ed8;
+            background: #374151;
         }
 
-        .btn-secondary {
-            background: #ffffff;
-            color: #475569;
-            border: 1px solid #cbd5e1;
+        .btn-link {
+            color: #4b5563;
+            padding: 0.5rem 0.25rem;
+            background: transparent;
         }
 
-        .btn-secondary:hover {
-            background: #f8fafc;
-            color: #1e293b;
-            border-color: #94a3b8;
+        .btn-link:hover {
+            color: #111827;
+            text-decoration: underline;
         }
 
-        .footer {
-            margin-top: 1.25rem;
+        .meta {
+            border-top: 1px solid #f3f4f6;
+            padding-top: 1.25rem;
             font-size: 0.75rem;
-            color: #94a3b8;
+            color: #9ca3af;
+            line-height: 1.6;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <div class="icon-wrapper">
-                <svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-            </div>
+    <div class="wrapper">
+        <div class="code">403 &bull; Akses Dibatasi</div>
+        <h1>Akses Anda Ditahan</h1>
+        <p class="desc">
+            Sistem mendeteksi aktivitas atau pola permintaan yang tidak biasa dari koneksi Anda. Demi perlindungan data dan keamanan, permintaan ini untuk sementara tidak dapat diproses.
+        </p>
 
-            <div class="code-badge">403 &bull; AKSES DITOLAK</div>
-            <h1>Akses Anda Ditahan</h1>
-            <p class="desc">
-                Sistem mendeteksi aktivitas atau pola permintaan yang tidak biasa dari koneksi Anda. Demi keamanan sistem, permintaan ini untuk sementara tidak dapat diproses.
-            </p>
+        <div class="actions">
+            <a href="{{ url('/') }}" class="btn btn-primary">Kembali ke Beranda</a>
+            <button type="button" onclick="window.history.back()" class="btn btn-link">Halaman Sebelumnya</button>
+        </div>
 
-            <div class="meta-box">
-                <div class="meta-item">
-                    <span class="label">Alamat IP</span>
-                    <span class="value">{{ request()->ip() ?? 'N/A' }}</span>
-                </div>
-                <div class="meta-item" style="text-align: right;">
-                    <span class="label">Waktu</span>
-                    <span class="value">{{ now()->setTimezone(config('app.timezone', 'UTC'))->format('H:i:s T') }}</span>
-                </div>
-            </div>
-
-            <div class="actions">
-                <a href="{{ url('/') }}" class="btn btn-primary">
-                    Kembali ke Beranda
-                </a>
-                <button type="button" onclick="window.history.back()" class="btn btn-secondary">
-                    Halaman Sebelumnya
-                </button>
-            </div>
-
-            <div class="footer">
-                Sistem Keamanan &bull; {{ config('app.name', 'Portal Aplikasi') }}
-            </div>
+        <div class="meta">
+            IP: {{ request()->ip() ?? 'N/A' }} &bull; {{ now()->setTimezone(config('app.timezone', 'UTC'))->format('d M Y, H:i T') }} &bull; {{ config('app.name', 'Sistem Keamanan') }}
         </div>
     </div>
 </body>
 </html>
-
