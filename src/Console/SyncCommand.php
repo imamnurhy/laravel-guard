@@ -4,6 +4,7 @@ namespace AppGuard\Console;
 
 use AppGuard\Core\Contracts\DynamicRuleStore;
 use AppGuard\Core\ControlPlaneClient;
+use AppGuard\Core\Snapshot\CompiledRulesSnapshot;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Cache;
 
@@ -45,8 +46,8 @@ final class SyncCommand extends Command
 
             if ($response->status() === 304) {
                 Cache::forget($cbKey);
-                $this->info('✓ Dynamic rules sudah up-to-date (HTTP 304 Not Modified).');
-                $this->refreshBannedIpsTtl($appKey);
+                $bannedCount = CompiledRulesSnapshot::countBannedIps($appKey);
+                $this->info("✓ Dynamic rules & compiled snapshot sudah up-to-date (HTTP 304 Not Modified, {$bannedCount} banned IPs aktif).");
                 return self::SUCCESS;
             }
 
@@ -69,10 +70,11 @@ final class SyncCommand extends Command
                     $this->info('✓ Disinkronkan dynamic thresholds.');
                 }
 
-                // 3. Simpan & Aktifkan IP Blacklist ke Cache Lokal Tenant dengan Masa Ban (TTL)
-                if (! empty($data['banned_ips']) && is_array($data['banned_ips'])) {
-                    $this->syncBannedIps($appKey, $data['banned_ips']);
-                }
+                // 3. Kompilasi & Simpan Snapshot Aturan & Blacklist IP (O(1) OPcache Engine)
+                $data['etag'] = (string) $response->header('ETag', '');
+                CompiledRulesSnapshot::write($appKey, $data);
+                $bannedCount = CompiledRulesSnapshot::countBannedIps($appKey);
+                $this->info("✓ Disinkronkan {$bannedCount} banned IPs ke compiled snapshot engine (O(1) OPcache hash map, 0 Redis bloat).");
 
                 // 4. Simpan Centralized Policy jika ada
                 if (! empty($data['policy']) && is_array($data['policy'])) {
@@ -178,6 +180,22 @@ final class SyncCommand extends Command
 
     private function loadFallbackSnapshot(DynamicRuleStore $ruleStore, string $appKey): void
     {
+        $snapshot = CompiledRulesSnapshot::load($appKey);
+        if ($snapshot !== null) {
+            if (! empty($snapshot['honeypots']) && is_array($snapshot['honeypots'])) {
+                $ruleStore->addDynamicHoneypots($snapshot['honeypots']);
+            }
+            if (! empty($snapshot['thresholds']) && is_array($snapshot['thresholds'])) {
+                $ruleStore->setDynamicThresholds($snapshot['thresholds']);
+            }
+            if (! empty($snapshot['policy']) && is_array($snapshot['policy'])) {
+                $ruleStore->setPolicy($snapshot['policy']);
+            }
+            $bannedCount = count($snapshot['banned_ips'] ?? []);
+            $this->info("✓ Memuat cadangan 'Last Known Good Rules' dari compiled snapshot lokal ({$bannedCount} banned IPs).");
+            return;
+        }
+
         $path = storage_path("app/guard/snapshot_{$appKey}.json");
         if (! file_exists($path)) {
             return;
@@ -191,66 +209,12 @@ final class SyncCommand extends Command
             if (! empty($data['thresholds']) && is_array($data['thresholds'])) {
                 $ruleStore->setDynamicThresholds($data['thresholds']);
             }
-            if (! empty($data['banned_ips']) && is_array($data['banned_ips'])) {
-                $this->syncBannedIps($appKey, $data['banned_ips'], isFallback: true);
-            }
             if (! empty($data['policy']) && is_array($data['policy'])) {
                 $ruleStore->setPolicy($data['policy']);
             }
-            $this->info("✓ Memuat cadangan 'Last Known Good Rules' dari snapshot lokal.");
+            $this->info("✓ Memuat cadangan 'Last Known Good Rules' dari snapshot JSON lokal.");
         } catch (\Throwable $e) {
             // Fail-open silent
         }
-    }
-
-    private function syncBannedIps(string $appKey, array $ips, bool $isFallback = false): void
-    {
-        $bannedKey = "guard:{$appKey}:banned_ips";
-        $previousBanned = (array) Cache::get($bannedKey, []);
-        $newBanned = array_values(array_unique(array_filter($ips)));
-        $banDuration = (int) config('guard.ip_ban.duration', 86400);
-
-        Cache::put($bannedKey, $newBanned, $banDuration);
-
-        if (app()->bound(\AppGuard\Core\Guard::class)) {
-            $guard = app(\AppGuard\Core\Guard::class);
-            $reason = $isFallback ? 'Fallback Snapshot Banned IP' : 'Control Plane Snapshot Banned IP';
-
-            // A. Aktifkan / perpanjang masa ban untuk semua IP di snapshot
-            foreach ($newBanned as $bannedIp) {
-                $guard->block((string) $bannedIp, $banDuration, $reason, 'control_plane');
-            }
-
-            // B. Otomatis unblock jika ada IP yang sudah dicabut dari snapshot
-            if (! $isFallback && $previousBanned !== []) {
-                $removedIps = array_diff($previousBanned, $newBanned);
-                foreach ($removedIps as $unbanIp) {
-                    $guard->unblock((string) $unbanIp, 'control_plane', 'Dihapus dari Snapshot Banned IPs');
-                }
-            }
-        }
-
-        $label = $isFallback ? 'dari snapshot lokal' : 'ke engine Guard';
-        $this->info("✓ Disinkronkan dan diaktifkan " . count($newBanned) . " banned IPs {$label} (TTL: {$banDuration}s).");
-    }
-
-    private function refreshBannedIpsTtl(string $appKey): void
-    {
-        $bannedKey = "guard:{$appKey}:banned_ips";
-        $currentBanned = (array) Cache::get($bannedKey, []);
-        if (empty($currentBanned)) {
-            return;
-        }
-
-        $banDuration = (int) config('guard.ip_ban.duration', 86400);
-        Cache::put($bannedKey, $currentBanned, $banDuration);
-
-        if (app()->bound(\AppGuard\Core\Guard::class)) {
-            $guard = app(\AppGuard\Core\Guard::class);
-            foreach ($currentBanned as $bannedIp) {
-                $guard->block((string) $bannedIp, $banDuration, 'Control Plane Snapshot Banned IP (304 Refreshed)', 'control_plane');
-            }
-        }
-        $this->info("✓ Memperbarui masa aktif " . count($currentBanned) . " banned IPs (TTL: {$banDuration}s).");
     }
 }

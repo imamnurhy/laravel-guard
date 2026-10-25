@@ -11,6 +11,9 @@ spl_autoload_register(function ($c) {
 if (! class_exists(\Illuminate\Console\Command::class)) {
     eval('namespace Illuminate\Console; class Command {}');
 }
+if (! class_exists(\Illuminate\Support\ServiceProvider::class)) {
+    eval('namespace Illuminate\Support; abstract class ServiceProvider { public $app; public function __construct($app = null) { $this->app = $app; } }');
+}
 
 function env($k, $d = null) { return $d; }
 function storage_path($p = '') { return sys_get_temp_dir() . '/' . $p; }
@@ -265,7 +268,8 @@ $arrVuln->recordExposed(['type' => 'test']);
 check('ArrayVulnerabilityStore stores and retrieves incidents', count($arrVuln->getExposedIncidents()) === 1);
 $nullVuln = new NullVulnerabilityStore();
 $nullVuln->recordExposed(['type' => 'ignored']);
-// 17. Auto-Record IP Block on Reputation Threshold & BanRegistry Visibility
+// 17. Auto-Record IP Block on Reputation Threshold & BanRegistry Visibility (When IP ban enabled)
+$guard->setIpBanEnabled(true);
 $testIp = '203.0.113.99';
 $store->hit("score:ip:{$testIp}", 1800, 70);
 check('IP with score 70 is flagged by isBlocked', $guard->isBlocked($testIp));
@@ -279,6 +283,16 @@ $guard->unblock($testIp);
 check('IP score is reset to 0 after unblock', $guard->scoreOf($testIp) === 0);
 check('IP is no longer blocked after unblock', ! $guard->isBlocked($testIp));
 check('IP removed from BanRegistry after unblock', $guard->findBan(BanRecord::TYPE_IP, $testIp) === null);
+
+// 17b. Default Safe Mode: When ip_ban.enabled is false (Zero Trust Default), auto-record IP is disabled
+$guard->setIpBanEnabled(false);
+$safeTestIp = '203.0.113.199';
+$store->hit("score:ip:{$safeTestIp}", 1800, 70);
+$strictInspectSafe = $guard->inspect($ctx('/login', $safeTestIp));
+check('IP is still blocked per-request on strict path when score 70', $strictInspectSafe->action === Action::Block);
+check('when ip_ban is disabled, IP is NOT auto-recorded in BanRegistry', $guard->findBan(BanRecord::TYPE_IP, $safeTestIp) === null);
+check('when ip_ban is disabled, Guard::hasExplicitBlock is false', ! $guard->hasExplicitBlock($safeTestIp));
+$guard->unblock($safeTestIp);
 
 // 18. Multi-driver Telemetry Store (JsonFile, Redis, Cache, Array) + ShipTelemetry batch queue
 $tmpJsonlPath = sys_get_temp_dir() . '/guard_test_' . uniqid() . '.jsonl';
@@ -370,6 +384,194 @@ $blockedView = file_get_contents(__DIR__ . '/../resources/views/blocked.blade.ph
 $throttledView = file_get_contents(__DIR__ . '/../resources/views/throttled.blade.php');
 check('blocked view template exists and contains security card & 403', str_contains($blockedView, '403') && str_contains($blockedView, 'Akses Anda Ditahan'));
 check('throttled view template exists and contains countdown timer & 429', str_contains($throttledView, '429') && str_contains($throttledView, 'id="timer"'));
+
+// 21. File-Compiled Snapshot Engine (OPcache Native O(1) & Zero Redis Bloat)
+use AppGuard\Core\Snapshot\CompiledRulesSnapshot;
+
+$snapshotTmpDir = sys_get_temp_dir() . '/guard_snapshot_test_' . uniqid();
+@mkdir($snapshotTmpDir, 0755, true);
+CompiledRulesSnapshot::setBasePath($snapshotTmpDir);
+
+$testAppKey = 'app_snap_test_123';
+$bannedIpsList = ['198.51.100.1', '198.51.100.2', '203.0.113.88', '192.0.2.1'];
+$dataPayload = [
+    'policy' => ['mode' => 'enforce', 'version' => 2],
+    'thresholds' => ['throttle' => 40, 'block' => 80],
+    'honeypots' => ['/secret-honeypot-path', '/.env'],
+    'banned_ips' => $bannedIpsList,
+    'etag' => '"etag_test_abc"',
+];
+
+$filePath = CompiledRulesSnapshot::write($testAppKey, $dataPayload);
+check('CompiledRulesSnapshot::write generates compiled PHP file', file_exists($filePath) && str_ends_with($filePath, "rules_{$testAppKey}.php"));
+
+$loadedSnapshot = CompiledRulesSnapshot::load($testAppKey, fresh: true);
+check('CompiledRulesSnapshot::load returns associative array', is_array($loadedSnapshot) && isset($loadedSnapshot['banned_ips']));
+check('banned_ips in compiled snapshot has O(1) hash map structure', isset($loadedSnapshot['banned_ips']['198.51.100.1']) && $loadedSnapshot['banned_ips']['198.51.100.1'] === 1);
+check('CompiledRulesSnapshot::countBannedIps returns correct count', CompiledRulesSnapshot::countBannedIps($testAppKey) === 4);
+check('CompiledRulesSnapshot::getBannedIps returns array of IP strings', count(CompiledRulesSnapshot::getBannedIps($testAppKey)) === 4 && in_array('203.0.113.88', CompiledRulesSnapshot::getBannedIps($testAppKey)));
+
+check('isIpBanned returns true for snapshot banned IP', CompiledRulesSnapshot::isIpBanned('198.51.100.1', $testAppKey));
+check('isIpBanned returns false for unlisted safe IP', ! CompiledRulesSnapshot::isIpBanned('10.0.0.1', $testAppKey));
+
+// Guard inspection integration
+$snapGuardStore = new ArrayStore();
+$snapVulnStore = new MockVulnerabilityStore();
+$snapConfig = [
+    'mode' => 'enforce',
+    'snapshot_path' => $snapshotTmpDir,
+    'control_plane' => ['app_key' => $testAppKey],
+    'thresholds' => ['throttle' => 50, 'block' => 100],
+    'ip_ban' => ['enabled' => true],
+];
+$snapGuard = new Guard($snapGuardStore, [], $snapConfig, null, $snapVulnStore);
+
+$bannedCtx = new RequestContext(
+    ip: '198.51.100.1',
+    method: 'GET',
+    path: '/dashboard',
+    attributes: ['tenant' => $testAppKey]
+);
+$bannedDecision = $snapGuard->inspect($bannedCtx);
+check('Guard::inspect blocks IP present in compiled snapshot when ip_ban is enabled', $bannedDecision->action === Action::Block && $bannedDecision->score === 100);
+check('Guard::inspect sets blocklist reason for snapshot IP', str_contains(implode(';', $bannedDecision->reasons()), 'snapshot banned_ips'));
+check('Guard::isBlocked returns true for snapshot IP', $snapGuard->isBlocked('198.51.100.1'));
+
+// Zero Trust Safe Mode: when ip_ban.enabled is false (default), snapshot IP does NOT block innocent requests
+$snapGuardSafe = new Guard($snapGuardStore, [], array_merge($snapConfig, ['ip_ban' => ['enabled' => false]]), null, $snapVulnStore);
+$safeOfficeDecision = $snapGuardSafe->inspect($bannedCtx);
+check('when ip_ban is false, snapshot IP does not block request (Zero Trust Safe Mode for shared office IP)', $safeOfficeDecision->action === Action::Allow);
+check('when ip_ban is false, isBlocked returns false for snapshot IP', ! $snapGuardSafe->isBlocked('198.51.100.1'));
+
+$safeCtx = new RequestContext(
+    ip: '10.0.0.50',
+    method: 'GET',
+    path: '/dashboard',
+    attributes: ['tenant' => $testAppKey]
+);
+$safeDecision = $snapGuard->inspect($safeCtx);
+check('Guard::inspect allows safe IP not in snapshot', $safeDecision->action === Action::Allow && $safeDecision->score === 0);
+check('Guard::isBlocked returns false for safe IP', ! $snapGuard->isBlocked('10.0.0.50'));
+
+// Zero Telemetry Poisoning & Zero Redis Bloat:
+// Compiling a snapshot must NOT record fake 'ban.created' incidents to VulnerabilityStore
+check('zero telemetry poisoning: VulnerabilityStore remains 0 after snapshot compile', count($snapVulnStore->recorded) === 0);
+
+// Fail-open validation: Unknown app key or missing file
+$missingCtx = new RequestContext(
+    ip: '198.51.100.1',
+    method: 'GET',
+    path: '/dashboard',
+    attributes: ['tenant' => 'non_existent_app_key']
+);
+$missingDecision = $snapGuard->inspect($missingCtx);
+check('fail-open allows request when snapshot file is missing', $missingDecision->action === Action::Allow);
+
+// Performance benchmark: O(1) hash map lookup latency
+$perfAppKey = 'app_perf_test';
+$largeIpSet = [];
+for ($i = 1; $i <= 5000; $i++) {
+    $largeIpSet[] = "198.18." . intdiv($i, 256) . "." . ($i % 256);
+}
+CompiledRulesSnapshot::write($perfAppKey, ['banned_ips' => $largeIpSet]);
+
+$t0 = microtime(true);
+for ($k = 0; $k < 1000; $k++) {
+    $targetIp = "198.18." . intdiv($k * 5, 256) . "." . (($k * 5) % 256);
+    CompiledRulesSnapshot::isIpBanned($targetIp, $perfAppKey);
+}
+$tDiff = (microtime(true) - $t0) * 1000; // in milliseconds for 1000 lookups
+check("O(1) hash map benchmark: 1,000 lookups completed in < 50ms (took {$tDiff}ms)", $tDiff < 50.0);
+
+// Cleanup test files
+CompiledRulesSnapshot::delete($testAppKey);
+CompiledRulesSnapshot::delete($perfAppKey);
+CompiledRulesSnapshot::clearMemoryCache();
+@rmdir($snapshotTmpDir);
+
+// -----------------------------------------------------------------------------
+// Recursive Config Merge Tests (GuardServiceProvider)
+// -----------------------------------------------------------------------------
+$provider = new \AppGuard\GuardServiceProvider();
+$mergeRefl = new ReflectionMethod($provider, 'mergeConfigRecursive');
+$mergeRefl->setAccessible(true);
+
+$defaultCfg = [
+    'enabled' => true,
+    'mode' => 'monitor',
+    'detectors' => [
+        'honeypot' => [
+            'enabled' => true,
+            'paths' => ['/wp-admin', '/admin.php'],
+        ],
+        'anomaly' => [
+            'enabled' => true,
+            'score' => 35,
+            'safe_fields' => [],
+        ],
+        'brute_force' => [
+            'enabled' => true,
+            'max_per_ip' => 20,
+        ],
+    ],
+    'profiles' => [
+        'strict' => [
+            'throttle' => 30,
+            'block' => 70,
+            'paths' => ['login', 'register'],
+        ],
+    ],
+    'user_ban' => [
+        'enabled' => true,
+        'model' => 'App\\Models\\User',
+        'attributes' => [],
+    ],
+];
+
+$userCfg = [
+    'mode' => 'enforce',
+    'detectors' => [
+        'anomaly' => [
+            'safe_fields' => ['*alamat*', 'rtdr_data'],
+        ],
+    ],
+    'profiles' => [
+        'strict' => [
+            'paths' => ['login', 'register', 'cek-status*'],
+        ],
+    ],
+    'user_ban' => [
+        'attributes' => [
+            'c_status' => 1,
+        ],
+    ],
+];
+
+$mergedCfg = $mergeRefl->invoke($provider, $defaultCfg, $userCfg);
+
+check('mergeConfigRecursive preserves sibling detectors when only anomaly is defined by user',
+    isset($mergedCfg['detectors']['honeypot']) && $mergedCfg['detectors']['honeypot']['enabled'] === true
+);
+check('mergeConfigRecursive preserves sibling brute_force detector',
+    isset($mergedCfg['detectors']['brute_force']) && $mergedCfg['detectors']['brute_force']['max_per_ip'] === 20
+);
+check('mergeConfigRecursive preserves anomaly default keys while overriding safe_fields',
+    $mergedCfg['detectors']['anomaly']['enabled'] === true
+    && $mergedCfg['detectors']['anomaly']['score'] === 35
+    && $mergedCfg['detectors']['anomaly']['safe_fields'] === ['*alamat*', 'rtdr_data']
+);
+check('mergeConfigRecursive overrides list in profiles.strict.paths without breaking throttle/block',
+    $mergedCfg['profiles']['strict']['throttle'] === 30
+    && $mergedCfg['profiles']['strict']['block'] === 70
+    && $mergedCfg['profiles']['strict']['paths'] === ['login', 'register', 'cek-status*']
+);
+check('mergeConfigRecursive correctly populates user_ban.attributes while preserving model',
+    $mergedCfg['user_ban']['model'] === 'App\\Models\\User'
+    && $mergedCfg['user_ban']['attributes'] === ['c_status' => 1]
+);
+check('mergeConfigRecursive overrides top-level scalar',
+    $mergedCfg['mode'] === 'enforce' && $mergedCfg['enabled'] === true
+);
 
 echo "\nSummary: " . ($fail === 0 ? "ALL TESTS PASSED ✅" : "{$fail} TESTS FAILED ❌") . "\n";
 exit($fail ? 1 : 0);

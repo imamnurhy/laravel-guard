@@ -6,6 +6,7 @@ use AppGuard\Core\Contracts\BanRegistry;
 use AppGuard\Core\Contracts\Detector;
 use AppGuard\Core\Contracts\Store;
 use AppGuard\Core\Contracts\VulnerabilityStore;
+use AppGuard\Core\Snapshot\CompiledRulesSnapshot;
 use AppGuard\Core\Support\IpMatcher;
 use AppGuard\Core\Support\PathMatcher;
 use Psr\Log\LoggerInterface;
@@ -250,18 +251,14 @@ final class Guard
             ));
         }
 
-        // Pertahanan Berlapis (Defense-in-Depth): Cek blacklist snapshot cache tenant
+        // Pertahanan Berlapis: Cek blacklist compiled snapshot tenant (O(1) OPcache hash map lookup)
         $tenant = $ctx->attributes['tenant'] ?? $this->currentTenant();
-        if ($tenant && class_exists(\Illuminate\Support\Facades\Cache::class) && \Illuminate\Support\Facades\Cache::getFacadeRoot() !== null) {
-            $bannedKey = "guard:{$tenant}:banned_ips";
-            $bannedIps = (array) \Illuminate\Support\Facades\Cache::get($bannedKey, []);
-            if (! empty($bannedIps) && in_array($ctx->ip, $bannedIps, true)) {
-                return $this->log($ctx, new Decision(
-                    Action::Block,
-                    100,
-                    [new Signal('blocklist', 100, 'IP is in snapshot banned_ips')],
-                ));
-            }
+        if ($this->isIpBanEnabled() && $tenant !== null && $tenant !== '' && $this->isIpBannedInSnapshot($ctx->ip, $tenant)) {
+            return $this->log($ctx, new Decision(
+                Action::Block,
+                100,
+                [new Signal('blocklist', 100, 'IP is in snapshot banned_ips')],
+            ));
         }
 
         // Cek jika user ID sedang dalam status banned di cache
@@ -555,9 +552,39 @@ final class Guard
         }
     }
 
+    public function isIpBanEnabled(): bool
+    {
+        return (bool) ($this->config['ip_ban']['enabled'] ?? false);
+    }
+
+    public function setIpBanEnabled(bool $enabled): self
+    {
+        $this->config['ip_ban']['enabled'] = $enabled;
+        return $this;
+    }
+
+    public function snapshotBasePath(): ?string
+    {
+        return $this->config['snapshot_path'] ?? null;
+    }
+
+    public function isIpBannedInSnapshot(string $ip, ?string $tenant = null): bool
+    {
+        $tenant = $tenant ?: $this->currentTenant();
+        if ($tenant === null || $tenant === '') {
+            return false;
+        }
+
+        return CompiledRulesSnapshot::isIpBanned($ip, $tenant, $this->snapshotBasePath());
+    }
+
     public function isBlocked(string $ip): bool
     {
         if ($this->store->has($this->blockKey($ip))) {
+            return true;
+        }
+
+        if ($this->isIpBanEnabled() && $this->isIpBannedInSnapshot($ip)) {
             return true;
         }
 
@@ -818,7 +845,7 @@ final class Guard
         array $signals = [],
         ?string $profileName = null
     ): void {
-        if (! ($this->config['ip_ban']['enabled'] ?? true)) {
+        if (! $this->isIpBanEnabled()) {
             return;
         }
 

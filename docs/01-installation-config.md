@@ -68,6 +68,7 @@ GUARD_LOG_CHANNEL=null
 | `allowlist` | `[]` | Daftar IP address yang tidak akan pernah diinspeksi (misal IP server monitoring / payment gateway). |
 | `thresholds` | `['throttle' => 50, 'block' => 100]` | Ambang batas poin penalti sebelum request terkena pembatasan laju atau penolakan total. |
 | `profiles` | `['strict' => [...]]` | Penyesuaian ambang batas khusus untuk rute sensitif tertentu (seperti `/login`, `/register`). |
+| `ip_ban` | `['enabled' => false, 'duration' => 1800]` | Pemblokiran IP otomatis (default: `false` demi Zero Trust & ramah NAT kantor/CGNAT). Detektor WAF tetap menolak HTTP 403 per request. |
 | `user_ban` | `[...]` | Konfigurasi pemblokiran akun di basis data, kolom status, durasi, dan rute pengalihan logout. |
 | `tebot` | `['enabled' => true]` | Saklar pengiriman alert Telegram via package `explorin/tebot`. |
 | `vulnerability` | `[...]` | Lokasi penyimpanan dataset insiden JSONL untuk keperluan audit & Machine Learning. |
@@ -81,3 +82,30 @@ GUARD_LOG_CHANNEL=null
 
 Karena AppGuard menilai reputasi berdasarkan alamat IP pengirim, **pastikan konfigurasi `TrustProxies` aplikasi Laravel Anda sudah benar**:
 - Jika di belakang Cloudflare, Nginx, Traefik, atau Docker Swarm, pastikan header `X-Forwarded-For` atau `CF-Connecting-IP` dipercaya oleh Laravel agar IP yang dinilai adalah IP asli pengunjung, bukan IP proxy lokal.
+
+---
+
+## 5. Pola Konfigurasi Minimalis (Delta Overrides) & Sinkronisasi Aman
+
+AppGuard mendukung **Recursive Config Merging**, yang memungkinkan aplikasi host (seperti `simponie-v3`) hanya menuliskan opsi kustom yang ingin diubah pada `config/guard.php` tanpa perlu menduplikasi seluruh 400+ baris konfigurasi default package.
+
+### A. Konsep Delta Overrides
+- Setiap opsi yang tidak ditulis di `config/guard.php` host akan **otomatis diwarisi** dari default package saat runtime.
+- Ketika ada fitur atau opsi baru dari pembaruan package, opsi tersebut **langsung aktif di memori** tanpa mengharuskan perubahan pada berkas `config/guard.php` host.
+
+### B. Manajemen & Sinkronisasi Konfigurasi (`guard:config`)
+Gunakan perintah CLI bawaan untuk memeriksa dan menyinkronkan konfigurasi secara aman:
+
+```bash
+# 1. Audit status konfigurasi (Kustom vs Diwarisi):
+php artisan guard:config
+
+# 2. Perbandingan detail (diff):
+php artisan guard:config --diff
+
+# 3. Lihat snippet kode siap salin untuk opsi tertentu:
+php artisan guard:config --snippet=ip_ban
+
+# 4. Sinkronkan opsi baru/absen ke dalam config/guard.php host secara aman (otomatis backup):
+php artisan guard:config --sync --key=<nama_opsi>
+```

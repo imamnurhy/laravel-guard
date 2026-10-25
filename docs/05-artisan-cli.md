@@ -125,3 +125,32 @@ php artisan guard:ship-telemetry --batch-size=100
 # Pengiriman status heartbeat kesehatan sensor
 php artisan guard:heartbeat
 ```
+
+---
+
+## 7. Audit, Perbandingan & Sinkronisasi Konfigurasi (`guard:config`)
+
+Perintah untuk memeriksa status konfigurasi `config/guard.php` host app terhadap default package, melihat perbandingan (*diff*), menampilkan potongan kode (*snippet*), dan menyinkronkan opsi baru tanpa merusak kustomisasi yang ada:
+
+```bash
+# 1. Ringkasan audit konfigurasi host app vs default package:
+php artisan guard:config
+
+# 2. Perbandingan detail (diff) nilai kustom host vs default package:
+php artisan guard:config --diff
+php artisan guard:config --diff --key=user_ban
+php artisan guard:config --diff --key=detectors
+
+# 3. Menampilkan potongan kode (snippet) siap salin untuk opsi tertentu:
+php artisan guard:config --snippet=ip_ban
+php artisan guard:config --snippet=detectors.honeypot
+php artisan guard:config --snippet=rules
+
+# 4. Menyinkronkan opsi baru/absen ke dalam config/guard.php secara aman (otomatis backup):
+php artisan guard:config --sync
+php artisan guard:config --sync --key=responses
+php artisan guard:config --sync --key=ip_ban --force
+
+# 5. Keluaran terstruktur JSON untuk otomasi CI/CD:
+php artisan guard:config --json
+```

@@ -10,11 +10,13 @@ Dibangun dengan prinsip **Scoring-based Detection** (bukan if-else kaku), berjal
 
 ## ⚡ 3-Step Quick Start
 
-### 1. Instalasi
+### 1. Instalasi & Konfigurasi
 ```bash
 composer require explorin/laravel-guard
 php artisan vendor:publish --tag=guard-config
 ```
+> [!TIP]
+> **Minimal Config Pattern (Delta Overrides)**: Berkas `config/guard.php` host app hanya perlu memuat opsi yang ingin Anda kustomisasi (misal: `profiles`, `safe_fields`, `user_ban.attributes`). Seluruh konfigurasi default package (detektor honeypot, brute force, bobot rules, dsb) otomatis digabung via `mergeConfigRecursive` tanpa perlu menduplikasi 400+ baris kode.
 
 ### 2. Konfigurasi `.env`
 ```env
@@ -92,6 +94,12 @@ php artisan guard:unban-user {userId} --sync-db # Buka blokir user di cache & pu
 php artisan guard:sync                      # Tarik aturan dinamis, honeypots baru, & remote policy
 php artisan guard:ship-telemetry            # Kirim batch rekaman insiden (jsonl/redis/cache) ke Control Plane
 php artisan guard:heartbeat                 # Kirim sinyal heartbeat status kesehatan sensor ke Control Plane
+
+# === Audit, Diff & Sinkronisasi Konfigurasi ===
+php artisan guard:config                    # Audit status konfigurasi host vs default package
+php artisan guard:config --diff             # Perbandingan detail (diff) nilai kustom host vs package default
+php artisan guard:config --snippet=ip_ban   # Potongan kode konfigurasi asli siap salin
+php artisan guard:config --sync --key=<key> # Sisipkan opsi baru ke config/guard.php secara aman (auto-backup)
 ```
 
 ### 3. Event Hook, Custom Responder, & Resolver
@@ -129,7 +137,7 @@ Package ini menyediakan script smoke test mandiri yang dapat dijalankan tanpa de
 ```bash
 php tests/smoke.php
 ```
-*(Seluruh 19/19 checks pengujian lolos 100%).*
+*(Seluruh 104 checks pengujian lolos 100%).*
 
 ---
 

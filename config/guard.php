@@ -187,12 +187,49 @@ return [
     |--------------------------------------------------------------------------
     | 5.1. Pemblokiran IP Otomatis & Ban Registry (Auto-Block IP)
     |--------------------------------------------------------------------------
-    | Mencatat pemblokiran IP ke dalam BanRegistry dan cache saat request menghasilkan
-    | keputusan Block, sehingga terpantau langsung pada CLI (guard:ban, guard:status).
+    | Mengatur apakah IP penyerang otomatis diblokir secara global di level cache
+    | saat request menghasilkan keputusan Block (skor >= 100).
+    |
+    | [Zero Trust Best Practice]:
+    | Nilai default: FALSE (Nonaktif).
+    | Di era modern (NAT kantor bersama & ISP CGNAT seperti Indihome/Telkomsel),
+    | pemblokiran IP otomatis sering menimbulkan collateral damage (rekan kerja
+    | atau warga lain di IP publik yang sama ikut terblokir).
+    |
+    | Menonaktifkan IP ban TIDAK melemahkan keamanan aplikasi, karena:
+    | 1. Seluruh detektor WAF (Honeypot, SQLi, XSS, Traversal) TETAP MENOLAK
+    |    request jahat secara seketika dengan HTTP 403 Forbidden.
+    | 2. Pelaku terotentikasi tetap dihukum tegas via User Ban & Force Logout.
+    | 3. Pemblokiran IP manual via Artisan CLI (guard:block) tetap tersedia.
+    |
+    | -------------------------------------------------------------------------
+    | PANDUAN PENGGUNAAN: Kapan Harus Mengaktifkan vs Menonaktifkan Fitur Ini?
+    | -------------------------------------------------------------------------
+    |
+    | 🟢 KAPAN HARUS DIAKTIFKAN (GUARD_IP_BAN_ENABLED=true):
+    | 1. Serangan Bot Flooding / DoS Masif (Tanpa Cloudflare/CDN):
+    |    Saat server VPS diserang ribuan request per detik oleh botnet dan Anda
+    |    ingin memutus koneksi di gerbang paling depan untuk menghemat beban CPU.
+    | 2. Endpoint API Murni Machine-to-Machine (B2B / Antar-Server):
+    |    Klien adalah server dengan IP statis dedicated (bukan manusia di kantor/WiFi),
+    |    sehingga pemblokiran IP 100% aman tanpa risiko salah sasaran.
+    | 3. Jaringan Intranet Privat / Korporasi Tanpa NAT:
+    |    Setiap workstation memiliki IP unik (bukan IP publik bersama).
+    | 4. Tanggap Darurat Insiden Keamanan (War Room):
+    |    Aktifkan sementara dengan durasi pendek (misal: duration = 900 / 15 menit)
+    |    atau gunakan manual ban via `php artisan guard:block <ip>`.
+    |
+    | 🔴 KAPAN HARUS TETAP NONAKTIF (GUARD_IP_BAN_ENABLED=false / Default):
+    | 1. Aplikasi Pelayanan Publik untuk Masyarakat (e.g. simponie-v3):
+    |    Warga mengakses via provider seluler/ISP yang menerapkan CGNAT massal.
+    | 2. Aplikasi Internal Perkantoran:
+    |    Ratusan pegawai berbagi satu IP publik router gateway NAT yang sama.
+    | 3. Aplikasi yang Sudah Dilindungi Cloudflare / WAF Edge:
+    |    Mitigasi IP DoS sudah ditangani sepenuhnya oleh CDN di lapisan terluar.
     */
     'ip_ban' => [
-        'enabled'  => env('GUARD_IP_BAN_ENABLED', true),
-        // Durasi pemblokiran IP di layer cache/store (dalam detik, default 1800 = 30 menit)
+        'enabled'  => env('GUARD_IP_BAN_ENABLED', false),
+        // Durasi pemblokiran IP di layer cache/store (dalam detik, disarankan singkat: 900-1800 detik)
         'duration' => (int) env('GUARD_IP_BAN_DURATION', 1800),
     ],
 

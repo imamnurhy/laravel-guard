@@ -15,6 +15,7 @@ use AppGuard\Core\Detectors\PathTraversalDetector;
 use AppGuard\Core\Guard;
 use AppGuard\Console\BanCommand;
 use AppGuard\Console\BlockCommand;
+use AppGuard\Console\ConfigCommand;
 use AppGuard\Console\DoctorCommand;
 use AppGuard\Console\HeartbeatCommand;
 use AppGuard\Console\InstallCommand;
@@ -51,7 +52,9 @@ class GuardServiceProvider extends ServiceProvider
 {
     public function register(): void
     {
-        $this->mergeConfigFrom(__DIR__ . '/../config/guard.php', 'guard');
+        $defaultConfig = require __DIR__ . '/../config/guard.php';
+        $userConfig = $this->app['config']->get('guard', []);
+        $this->app['config']->set('guard', $this->mergeConfigRecursive($defaultConfig, $userConfig));
 
         $this->app->singleton(Store::class, function ($app) {
             $storeName = $app['config']->get('guard.store');
@@ -270,6 +273,30 @@ class GuardServiceProvider extends ServiceProvider
             : "{$base}:";
     }
 
+    /**
+     * Recursively merge configuration arrays.
+     * Associative arrays are merged recursively, while lists (indexed arrays)
+     * and scalars in the user config will overwrite default values.
+     */
+    protected function mergeConfigRecursive(array $default, array $user): array
+    {
+        foreach ($user as $key => $value) {
+            if (
+                array_key_exists($key, $default)
+                && is_array($default[$key])
+                && is_array($value)
+                && ! array_is_list($default[$key])
+                && ! array_is_list($value)
+            ) {
+                $default[$key] = $this->mergeConfigRecursive($default[$key], $value);
+            } else {
+                $default[$key] = $value;
+            }
+        }
+
+        return $default;
+    }
+
     public function boot(): void
     {
         $this->publishes([
@@ -313,6 +340,7 @@ class GuardServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallCommand::class,
+                ConfigCommand::class,
                 BanCommand::class,
                 BlockCommand::class,
                 UnblockCommand::class,
