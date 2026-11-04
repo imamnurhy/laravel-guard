@@ -203,7 +203,8 @@ class GuardServiceProvider extends ServiceProvider
             }
 
             // 8. Guard Sensor Token Integrity Detector (Client Security Verification)
-            if ($cfg['detectors']['sensor_token']['enabled'] ?? true) {
+            $sensorEnabled = (bool) ($cfg['sensor']['enabled'] ?? true);
+            if ($sensorEnabled && ($cfg['detectors']['sensor_token']['enabled'] ?? true)) {
                 $detectors[] = new \AppGuard\Core\Detectors\SensorTokenDetector(array_merge(
                     $cfg['detectors']['sensor_token'] ?? [],
                     ['secret_hash' => $cfg['control_plane']['app_secret'] ?? '']
@@ -332,9 +333,11 @@ class GuardServiceProvider extends ServiceProvider
                 ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
 
             // Route Internal Proxy untuk Sensor Script & Beacon (Menyembunyikan Private IP Control Plane)
-            $this->app['router']->get('/guard/sensor.js', [\AppGuard\Http\SensorProxyController::class, 'script']);
-            $this->app['router']->post('/guard/beacon', [\AppGuard\Http\SensorProxyController::class, 'beacon'])
-                ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+            if ($this->app['config']->get('guard.sensor.enabled', true)) {
+                $this->app['router']->get('/guard/sensor.js', [\AppGuard\Http\SensorProxyController::class, 'script']);
+                $this->app['router']->post('/guard/beacon', [\AppGuard\Http\SensorProxyController::class, 'beacon'])
+                    ->withoutMiddleware([\App\Http\Middleware\VerifyCsrfToken::class, \Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
+            }
         }
 
         if ($this->app->runningInConsole()) {

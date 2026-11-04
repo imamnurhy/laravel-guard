@@ -375,6 +375,10 @@ return [
             'xss_score'  => 50,
             // Field formulir yang dikecualikan dari scanning (misal: WYSIWYG editor artikel / HTML)
             'safe_fields' => [
+                '*token*',
+                '*_token',
+                'ocr_token',
+                'captcha',
                 // 'content', 'deskripsi', 'body_html',
             ],
         ],
@@ -403,14 +407,34 @@ return [
             'fuzzing_score'      => 50,
             // Field teks panjang yang diizinkan memiliki variasi karakter bebas
             'safe_fields' => [
+                '*token*',
+                '*_token',
+                'ocr_token',
+                'captcha',
                 // 'catatan', 'keterangan', 'alasan',
             ],
+        ],
+
+        // 8. Verifikasi token integritas browser client (Sensor Token)
+        'sensor_token' => [
+            'enabled' => env('GUARD_SENSOR_ENABLED', true),
         ],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | 9. Detektor Kustom (Custom Detectors)
+    | 9. Fitur Sensor Client (Client Security Integrity & Beacon)
+    |--------------------------------------------------------------------------
+    | Distribusi sensor.js dan verifikasi token integritas browser client.
+    | Set GUARD_SENSOR_ENABLED=false untuk menonaktifkan fitur sensor sepenuhnya.
+    */
+    'sensor' => [
+        'enabled' => env('GUARD_SENSOR_ENABLED', true),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | 10. Detektor Kustom (Custom Detectors)
     |--------------------------------------------------------------------------
     | Daftarkan kelas detektor tambahan buatan Anda yang mengimplementasikan:
     | `AppGuard\Core\Contracts\Detector`.

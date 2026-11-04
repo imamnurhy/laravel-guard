@@ -69,6 +69,23 @@ final class MaliciousPayloadDetector extends AbstractDetector
     }
 
     /**
+     * Memeriksa apakah field cocok dengan daftar safe_fields (termasuk wildcard fnmatch).
+     */
+    private function isSafeField(string $key, string $fullKey, array $safeFields): bool
+    {
+        foreach ($safeFields as $pattern) {
+            if ($key === $pattern || $fullKey === $pattern) {
+                return true;
+            }
+            if (str_contains($pattern, '*') && (fnmatch($pattern, $key) || fnmatch($pattern, $fullKey))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Mengurai input bersarang (nested array) menjadi pasangan key-value string.
      */
     private function flattenInputs(array $inputs, array $safeFields, string $prefix = ''): array
@@ -78,7 +95,7 @@ final class MaliciousPayloadDetector extends AbstractDetector
         foreach ($inputs as $key => $val) {
             $fullKey = $prefix === '' ? (string)$key : "{$prefix}.{$key}";
 
-            if (in_array($key, $safeFields, true) || in_array($fullKey, $safeFields, true)) {
+            if ($this->isSafeField((string)$key, $fullKey, $safeFields)) {
                 continue;
             }
 

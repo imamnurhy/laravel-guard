@@ -17,7 +17,7 @@ class SensorProxyController extends Controller
         $controlPlaneUrl = rtrim((string) config('guard.control_plane.url', ''), '/');
 
         // Jika control plane tidak disetel atau fitur dinonaktifkan, kembalikan stub aman (silent fail-open)
-        if (empty($controlPlaneUrl) || ! config('guard.enabled', true)) {
+        if (empty($controlPlaneUrl) || ! config('guard.enabled', true) || ! config('guard.sensor.enabled', true)) {
             return response("/* AppGuard sensor inactive (standalone mode) */\n", 200, [
                 'Content-Type' => 'application/javascript',
             ]);
@@ -59,7 +59,7 @@ class SensorProxyController extends Controller
     {
         $controlPlaneUrl = rtrim((string) config('guard.control_plane.url', ''), '/');
 
-        if (! empty($controlPlaneUrl) && config('guard.enabled', true)) {
+        if (! empty($controlPlaneUrl) && config('guard.enabled', true) && config('guard.sensor.enabled', true)) {
             $timeout = (int) config('guard.control_plane.timeout', 3);
 
             try {

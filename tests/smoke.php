@@ -138,6 +138,11 @@ check('valid JSON string payload is auto-bypassed from high entropy', $guard->in
     'inputs' => ['rtdr_data' => $jsonPayload]
 ]))->score === 0);
 
+$base64EncryptedJson = 'eyJpdiI6IjZOL2FlMXBUMkZBS3Jza29XQzI4eUE9PSIsInZhbHVlIjoiU0NZNkhCUThOSXU2S2xMTmhleWhac09SOGM0c1BoNVlPd01OV2k3TldHYVdNUVkyempsSDJJWGEydmM0WXNyS3NZb0g5Zk96d3RxY2Y2d3VzQlo3eWxRV1lzRVBuakRvMmllaFhEc0VuSzQ9IiwibWFjIjoiOTE4ZmJhZDQwZjRjNjZmOGM3OGYwNTk1ZGEzZjA1OTJiMjUwMmNkMmU5OGFlNTBmZDBkY2IyYmZkMmVhODk5ZCIsInRhZyI6IiJ9';
+check('base64 encrypted JSON token (e.g. ocr_token) is auto-bypassed from high entropy', $guard->inspect($ctx('/register', '16.16.16.17', null, '201', 'POST', [
+    'inputs' => ['ocr_token' => $base64EncryptedJson]
+]))->score === 0);
+
 $anomalyDetectorWithWildcard = new AnomalyDetector($store, [
     'enabled' => true,
     'safe_fields' => ['*alamat*', 'rtdr_data'],

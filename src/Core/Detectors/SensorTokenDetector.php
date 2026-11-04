@@ -23,7 +23,7 @@ final class SensorTokenDetector extends AbstractDetector
 
     public function inspect(RequestContext $ctx): array
     {
-        $enabled = (bool) ($this->config['enabled'] ?? true);
+        $enabled = (bool) ($this->config['enabled'] ?? true) && (bool) config('guard.sensor.enabled', true);
         if (! $enabled) {
             return [];
         }

@@ -44,8 +44,8 @@ final class AnomalyDetector extends AbstractDetector
                 continue;
             }
 
-            // Abaikan jika string merupakan payload JSON terstruktur yang valid
-            if ($this->isValidJson($val)) {
+            // Abaikan jika string merupakan payload JSON terstruktur yang valid atau base64-encoded JSON (misal: token enkripsi Laravel / JWT)
+            if ($this->isValidJson($val) || $this->isBase64Json($val)) {
                 continue;
             }
 
@@ -88,6 +88,42 @@ final class AnomalyDetector extends AbstractDetector
 
         json_decode($trimmed);
         return json_last_error() === JSON_ERROR_NONE;
+    }
+
+    /**
+     * Memeriksa apakah string merupakan JSON terstruktur valid yang di-encode base64 (misal: Laravel encrypted payload atau JWT).
+     */
+    private function isBase64Json(string $val): bool
+    {
+        $trimmed = trim($val);
+        $len = strlen($trimmed);
+
+        if ($len < 4) {
+            return false;
+        }
+
+        // Cek bagian jika token JWT (dipisahkan tanda titik)
+        if (str_contains($trimmed, '.')) {
+            $parts = explode('.', $trimmed);
+            if (count($parts) >= 2) {
+                $firstDecoded = base64_decode(strtr($parts[0], '-_', '+/'), true);
+                if ($firstDecoded && $this->isValidJson($firstDecoded)) {
+                    return true;
+                }
+            }
+        }
+
+        // Cek format base64 standar (seperti Laravel Encrypter output: base64(json))
+        if (! preg_match('/^[A-Za-z0-9+\/_-]+={0,2}$/', $trimmed)) {
+            return false;
+        }
+
+        $decoded = base64_decode($trimmed, true);
+        if ($decoded === false) {
+            return false;
+        }
+
+        return $this->isValidJson($decoded);
     }
 
     /**
