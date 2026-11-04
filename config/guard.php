@@ -414,27 +414,11 @@ return [
                 // 'catatan', 'keterangan', 'alasan',
             ],
         ],
-
-        // 8. Verifikasi token integritas browser client (Sensor Token)
-        'sensor_token' => [
-            'enabled' => env('GUARD_SENSOR_ENABLED', true),
-        ],
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | 9. Fitur Sensor Client (Client Security Integrity & Beacon)
-    |--------------------------------------------------------------------------
-    | Distribusi sensor.js dan verifikasi token integritas browser client.
-    | Set GUARD_SENSOR_ENABLED=false untuk menonaktifkan fitur sensor sepenuhnya.
-    */
-    'sensor' => [
-        'enabled' => env('GUARD_SENSOR_ENABLED', true),
-    ],
-
-    /*
-    |--------------------------------------------------------------------------
-    | 10. Detektor Kustom (Custom Detectors)
+    | 9. Detektor Kustom (Custom Detectors)
     |--------------------------------------------------------------------------
     | Daftarkan kelas detektor tambahan buatan Anda yang mengimplementasikan:
     | `AppGuard\Core\Contracts\Detector`.
